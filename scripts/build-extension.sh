@@ -12,7 +12,7 @@ DIST="$HERE/dist"
 OUT="$DIST/firefox"
 
 rm -rf "$DIST"
-mkdir -p "$OUT/src/modules" "$OUT/icons"
+mkdir -p "$OUT/src/modules" "$OUT/src/content" "$OUT/icons"
 
 cp "$HERE/manifest.json"        "$OUT/manifest.json"
 cp "$HERE/src/api.js"           "$OUT/src/api.js"
@@ -25,6 +25,7 @@ cp "$HERE/src/popup.js"         "$OUT/src/popup.js"
 cp "$HERE/src/options.html"     "$OUT/src/options.html"
 cp "$HERE/src/options.js"       "$OUT/src/options.js"
 cp "$HERE"/src/modules/*.js     "$OUT/src/modules/"
+cp "$HERE"/src/content/*.js     "$OUT/src/content/"
 cp "$HERE"/icons/*              "$OUT/icons/"
 
 if ! command -v zip >/dev/null 2>&1; then

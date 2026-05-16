@@ -47,6 +47,10 @@ function makeEvent() {
 }
 
 export function makeFakeBrowser(overrides = {}) {
+  // Capture runtime.onMessage listeners so tests can fire synthetic
+  // sendMessage calls and inspect the listener's Promise reply.
+  const onMessageListeners = [];
+  const onTabRemovedListeners = [];
   const fakes = {
     runtime: {
       id: "test-ext-id",
@@ -54,12 +58,19 @@ export function makeFakeBrowser(overrides = {}) {
       connectNative: () => { throw new Error("override connectNative"); },
       onStartup: { addListener: () => {} },
       onInstalled: { addListener: () => {} },
-      onMessage: { addListener: () => {} },
+      onMessage: {
+        addListener: (cb) => onMessageListeners.push(cb),
+        _listeners: onMessageListeners,
+      },
     },
     tabs: {
       query: (_q) => Promise.resolve([]),
       create: (p) => Promise.resolve({ id: 99, ...p }),
       remove: (_ids) => Promise.resolve(),
+      onRemoved: {
+        addListener: (cb) => onTabRemovedListeners.push(cb),
+        _listeners: onTabRemovedListeners,
+      },
     },
     cookies: {
       getAll: (_q) => Promise.resolve([]),
@@ -160,5 +171,28 @@ export function loadExtension(opts = {}) {
   evalFile("modules/notifications.js");
   evalFile("modules/screenlock.js");
 
+  if (opts.loadBackground) {
+    evalFile("background.js");
+  }
+
   return { scope, port: fakePortHandle };
+}
+
+/**
+ * Convenience wrapper that also loads `src/background.js`. Returns
+ * a `sendMessage(req, senderOverride?)` helper that fires the
+ * captured runtime.onMessage listener and returns its Promise reply.
+ */
+export function loadWithBackground(opts = {}) {
+  const env = loadExtension({ ...opts, loadBackground: true });
+  const listeners = env.scope.browser.runtime.onMessage._listeners;
+  const sendMessage = (req, senderOverride) => {
+    const sender = senderOverride || { id: env.scope.browser.runtime.id };
+    for (const cb of listeners) {
+      const ret = cb(req, sender);
+      if (ret && typeof ret.then === "function") return ret;
+    }
+    return Promise.resolve(undefined);
+  };
+  return { ...env, sendMessage };
 }

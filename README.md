@@ -12,21 +12,29 @@ qdchrome-extension can build a Firefox MV2 xpi (concatenated bundle, `chrome.*` 
 
 ## Status
 
-v0.2.0 — early. Same 8 modules as qdchrome-extension plus `containers`:
+v0.2.0 — 9 modules + 3 content-script observers. 71 vitest cases, all green.
 
 | Module           | Direction        | Ops                                                 |
 |------------------|------------------|-----------------------------------------------------|
 | `tabs`           | bridge → ext     | `tabs.list`, `tabs.open`, `tabs.close`              |
-| `pwd`            | ext → bridge     | `pwd.fill`, `pwd.save`                              |
+| `pwd`            | ext → bridge     | `pwd.fill`, `pwd.save` (driven by `pwd-content.js`) |
 | `pageExtract`    | ext → bridge     | `page.extract`                                      |
 | `cookies`        | ext → bridge     | `cookies.export` (intent token)                     |
 | `containers`     | bridge → ext     | `containers.list`, `containers.create`, `containers.remove` (Firefox-only) |
-| `mpris`          | both             | `mpris.update`, `mpris.control`                     |
+| `mpris`          | both             | `mpris.update`, `mpris.control` (driven by `mpris-content.js`) |
 | `downloads`      | ext → bridge     | `downloads.update`                                  |
 | `notifications`  | both             | `notifications.show`, `notifications.event`         |
-| `screenlock`     | ext → bridge     | `screenlock.inhibit`, `screenlock.release`          |
+| `screenlock`     | ext → bridge     | `screenlock.inhibit`, `screenlock.release` (driven by `screenlock-content.js`) |
 
 `tabs.open` accepts `cookie_store_id` to pin the new tab to a container; `cookies.export` accepts the same field to scope the export.
+
+### Content scripts
+
+Injected at `document_idle` on `<all_urls>`. See `todo/03..05` for open items.
+
+- `pwd-content.js` — on `<input type=password>` focus: queries the bridge for credentials, auto-fills if exactly one match, renders a minimal picker otherwise. On `<form>` submit with a changed password: forwards to `pwd.save`.
+- `mpris-content.js` — 1Hz poll of `navigator.mediaSession.metadata` + `playbackState`, plus event-driven updates on `play`/`pause`/`ended`. Reports to the bridge as `mpris.update`. Receives `mpris.do_action` from the bridge and translates to `HTMLMediaElement.play()`/`.pause()` / `.currentTime`.
+- `screenlock-content.js` — `fullscreenchange` listener. Inhibits the screen lock on fullscreen entry (classified as `fullscreen_video` if a playing `<video>` is inside, else `fullscreen_presentation`); releases on exit or `pagehide`. Background event page reference-counts per tab and releases on `tabs.onRemoved`.
 
 ## Build
 

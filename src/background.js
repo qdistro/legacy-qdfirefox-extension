@@ -42,14 +42,26 @@ if (api && api.runtime && api.runtime.onInstalled) {
 // inline so the port is ready by the time the first request arrives.
 bootOnce();
 
+// Per-tab screenlock-inhibit accounting. The compositor's
+// idle-inhibit protocol is reference-counted on the bridge side,
+// but we still need to clean up if a tab vanishes without firing
+// `pagehide` (e.g. crashed renderer).
+const screenlockTabs = new Set();
+if (api && api.tabs && api.tabs.onRemoved) {
+  api.tabs.onRemoved.addListener((tabId) => {
+    if (screenlockTabs.delete(tabId) && self.qdistroScreenlock) {
+      self.qdistroScreenlock.release("tab_removed").catch(() => {});
+    }
+  });
+}
+
 // Popup ↔ background channel.
 if (api && api.runtime && api.runtime.onMessage) {
   api.runtime.onMessage.addListener((req, sender) => {
-    // Reject anything that isn't our own popup/options page. Without
-    // `externally_connectable` in the manifest, Firefox already
-    // refuses cross-extension and page-context sendMessage calls,
-    // but a content script of *our* extension could in principle
-    // call sendMessage with arbitrary URLs — defense-in-depth check.
+    // Reject anything that isn't our own popup/options page or one
+    // of our content scripts. Without `externally_connectable` in
+    // the manifest, Firefox already refuses cross-extension and
+    // page-context sendMessage calls; this is defense-in-depth.
     if (!sender || sender.id !== api.runtime.id) {
       return Promise.resolve({ ok: false, error: "untrusted_sender" });
     }
@@ -80,6 +92,62 @@ if (api && api.runtime && api.runtime.onMessage) {
             }
             return { ok: true, containers: await self.qdistroContainers.list() };
           }
+
+          // ---- content-script entry points ---------------------------
+          // Each mints/forwards an intent token where the bridge
+          // requires one; tokens carry hmac=null in MVP (see
+          // todo/06-intent-token-hmac.md).
+
+          case "pwd.request_fill": {
+            const intent = self.qdistroIntent.mint("pwd.fill");
+            const r = await self.qdistroPwd.fill(
+              req.url || (sender.url || ""),
+              req.username || null,
+              intent,
+            );
+            return { ok: true, response: r };
+          }
+          case "pwd.request_save": {
+            const intent = self.qdistroIntent.mint("pwd.save");
+            const r = await self.qdistroPwd.save(
+              req.url || (sender.url || ""),
+              req.username || null,
+              req.password || "",
+              intent,
+            );
+            return { ok: true, response: r };
+          }
+          case "mpris.report_update": {
+            // Fire-and-forget — the page polls 1Hz; we don't want
+            // the content script blocked waiting on a wire ack.
+            self.qdistroMpris.update({
+              title: req.title || "",
+              artist: req.artist || "",
+              album: req.album || "",
+              art_url: req.art_url || "",
+              state: req.state || "none",
+              position: typeof req.position === "number" ? req.position : null,
+              duration: typeof req.duration === "number" ? req.duration : null,
+              url: req.url || (sender.url || ""),
+              tab_id: (sender.tab && sender.tab.id) || null,
+            }).catch(() => {});
+            return { ok: true };
+          }
+          case "screenlock.report_inhibit": {
+            const tabId = sender.tab && sender.tab.id;
+            if (typeof tabId === "number") screenlockTabs.add(tabId);
+            self.qdistroScreenlock.inhibit(req.reason || "fullscreen_video")
+              .catch(() => {});
+            return { ok: true };
+          }
+          case "screenlock.report_release": {
+            const tabId = sender.tab && sender.tab.id;
+            if (typeof tabId === "number") screenlockTabs.delete(tabId);
+            self.qdistroScreenlock.release(req.reason || "fullscreen_exit")
+              .catch(() => {});
+            return { ok: true };
+          }
+
           default:
             return { ok: false, error: "unknown_kind" };
         }
