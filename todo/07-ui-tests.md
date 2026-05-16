@@ -1,17 +1,19 @@
 # 07 — UI/glue coverage (background, popup, options, content scripts)
 
-## Gap
+## Status (2026-05-16)
 
-`tests/helpers.js` evals the IIFE modules from `src/` and `src/modules/` into a synthetic `self` global. Five files have zero coverage:
+| File | Coverage |
+|------|----------|
+| `src/background.js` | `tests/background.test.js` — runtime.onMessage entry points + content-script forward paths (no startup/install events yet) |
+| `src/popup.js` | `tests/popup.test.js` (jsdom) — status load, container dropdown, ping, cookies-export with/without container, no-active-tab, settings link, rejection handling |
+| `src/options.js` | `tests/options.test.js` (jsdom) — defaults, storage reflection, allowlist parse, save round-trip, Saved-indicator flash, containers checkbox present |
+| `src/content/pwd-content.js` | **uncovered** — needs a jsdom harness that synthesizes a `<form>` with password + username, fires focus, asserts the `runtime.sendMessage({kind:"pwd.request_fill"})`. The iframe path (post-`all_frames:true`) also wants a nested-document case. |
+| `src/content/mpris-content.js` | **uncovered** — needs a jsdom harness with a `navigator.mediaSession` shim. |
+| `src/content/screenlock-content.js` | **uncovered** — needs a jsdom harness firing `fullscreenchange` against a stub `document.fullscreenElement`. |
 
-- `src/background.js` — event-page boot, `runtime.onMessage` listener (status/ping/cookies.export/containers.list/content-script handlers).
-- `src/popup.js` — toolbar action UI logic.
-- `src/options.js` — preferences page UI logic.
-- `src/content/pwd-content.js` — autofill content script (added in [03]).
-- `src/content/mpris-content.js` — media observer content script (added in [04]).
-- `src/content/screenlock-content.js` — fullscreen observer content script (added in [05]).
+## Remaining gap
 
-That's ~500 LOC of glue with no behavioral pin.
+Three content scripts, ~250 LOC, still unpinned. Notes on each follow.
 
 ## Plan
 
