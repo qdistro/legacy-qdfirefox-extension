@@ -53,7 +53,7 @@ The existing extension behavior (inbound `notifications.show` from the bridge �
 
 ### Bridge-side gaps the extensions assume work
 
-- `containers.list / .create / .remove` — bridge has no handlers. Extension code is dead until the bridge ships them (qdfirefox-extension is the only emitter; qdchrome-extension doesn't have a containers module).
+- `containers.list / .create / .remove` — **own-uid round-trip pinned 2026-05-16** in `qdistro/tests/unit/test_browser_bridge_phase9.py::TestContainersRequest`. The bridge already routed these via `enqueue_inbound_request` (no per-op handler needed); the missing piece was `*.reply` registrations in `DEFAULT_HANDLERS` (suppresses orphan `unknown_op` noise) plus test coverage. Cross-user routing (admin uid → other user's bridge) is still open — see `qdistro/doc/firefox-containers.md`.
 - `cookies.export` `cookie_store_id` field — bridge's `_handle_cookies_export` ignores unknown fields. Forward-compatible.
 
 ## Plan
