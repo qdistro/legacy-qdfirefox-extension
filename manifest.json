@@ -55,8 +55,13 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
+      "js": ["src/content/pwd-content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": ["<all_urls>"],
       "js": [
-        "src/content/pwd-content.js",
         "src/content/mpris-content.js",
         "src/content/screenlock-content.js"
       ],

@@ -13,7 +13,7 @@ Initial content-script lands in commit alongside this doc. See `src/content/pwd-
 
 ## Open items
 
-1. **Cross-frame**. Today the content script registers in the top frame only. Login forms inside iframes (Google's federated-login UI, many SSO flows) are unreachable. Either add `all_frames: true` (and accept the perf cost) or limit to known-iframe-using origins via the options-page allowlist.
+1. **Cross-frame**. **Resolved 2026-05-16.** `pwd-content.js` now injects with `all_frames: true` (split into its own `content_scripts` entry so mpris/screenlock stay top-frame-only). Federated SSO flows inside iframes are now reached. Each frame uses its own `location.href` for the credential lookup — that's the correct security boundary, since saved credentials are keyed by the iframe's origin, not the embedder's. If a real-world site shows perf regressions from injection into many ad/tracker iframes, fall back to the options-page allowlist tracked in [02 of qdchrome's todo].
 
 2. **Credential-picker UI**. The MVP overlay is functional but ugly: a fixed-position `<div>` styled inline, no keyboard navigation, no escape-on-blur. Replace with a shadow-DOM widget styled to match Firefox's own login-doorhanger.
 
