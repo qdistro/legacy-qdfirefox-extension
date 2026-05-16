@@ -23,7 +23,7 @@ v0.2.0 — 9 modules + 3 content-script observers. 71 vitest cases, all green.
 | `containers`     | bridge → ext     | `containers.list`, `containers.create`, `containers.remove` (Firefox-only) |
 | `mpris`          | both             | `mpris.update`, `mpris.control` (driven by `mpris-content.js`) |
 | `downloads`      | ext → bridge     | `downloads.update`                                  |
-| `notifications`  | both             | `notifications.show`, `notifications.event`         |
+| `notifications`  | bridge → ext     | `notifications.show`                                |
 | `screenlock`     | ext → bridge     | `screenlock.inhibit`, `screenlock.release` (driven by `screenlock-content.js`) |
 
 `tabs.open` accepts `cookie_store_id` to pin the new tab to a container; `cookies.export` accepts the same field to scope the export.

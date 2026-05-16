@@ -1,5 +1,7 @@
-// notifications module — show / event forwarding.
-import { describe, it, expect, beforeEach, vi } from "vitest";
+// notifications module — show only (inbound). Outbound click/close
+// emission was dropped: the bridge has no handler and the
+// browser.notifications API only sees extension-owned notifications.
+import { describe, it, expect, beforeEach } from "vitest";
 import { loadExtension, makeFakeBrowser, makeFakePort } from "./helpers.js";
 
 describe("qdistroNotifications", () => {
@@ -12,32 +14,12 @@ describe("qdistroNotifications", () => {
     env.scope.qdistroNotifications.install();
   });
 
-  it("forwards onClicked as notifications.event {kind:'clicked'}", async () => {
+  it("does not emit notifications.event on click/close", async () => {
     browser.notifications.onClicked.fire("n-123");
-    const req = await vi.waitFor(
-      () => {
-        const m = env.port.sent.find((x) => x.op === "notifications.event");
-        if (!m) throw new Error("notifications.event not yet sent");
-        return m;
-      },
-      { timeout: 1000 },
-    );
-    expect(req).toMatchObject({ kind: "clicked", notification_id: "n-123" });
-  });
-
-  it("forwards onClosed with by_user flag", async () => {
     browser.notifications.onClosed.fire("n-7", true);
-    const req = await vi.waitFor(
-      () => {
-        const m = env.port.sent.find((x) => x.op === "notifications.event");
-        if (!m) throw new Error("notifications.event not yet sent");
-        return m;
-      },
-      { timeout: 1000 },
-    );
-    expect(req).toMatchObject({
-      kind: "closed", notification_id: "n-7", by_user: true,
-    });
+    await new Promise((r) => setTimeout(r, 0));
+    const events = env.port.sent.filter((m) => m.op === "notifications.event");
+    expect(events).toHaveLength(0);
   });
 
   it("notifications.show creates a notification via the API", async () => {

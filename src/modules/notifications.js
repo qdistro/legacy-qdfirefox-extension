@@ -1,14 +1,11 @@
 // notifications module.
 //
-// Listens to browser.notifications.onClicked / onClosed and forwards
-// to the bridge as `notifications.event`. The bridge applies the
-// per-origin policy and surfaces approved notifications via the
-// compositor.
-//
-// The browser.notifications API only surfaces extension-owned
-// notifications, not the page-level Notification API. To intercept
-// the latter we'd need a content-script Notification polyfill,
-// which is intrusive — deferred.
+// Inbound only: the bridge calls `notifications.show` to surface a
+// system notification via browser.notifications.create. There is no
+// outbound click/close forwarding — the bridge has no handler, and
+// the browser.notifications API only sees extension-owned
+// notifications anyway (the page-level Notification API would need a
+// content-script polyfill).
 //
 // @ts-check
 (function (root) {
@@ -17,22 +14,8 @@
   const dispatcher = root.qdistroDispatcher;
 
   function install() {
-    if (!api.notifications) return;
-    if (api.notifications.onClicked) {
-      api.notifications.onClicked.addListener((notificationId) => {
-        dispatcher.request("notifications.event", {
-          kind: "clicked", notification_id: notificationId,
-        }).catch(() => {});
-      });
-    }
-    if (api.notifications.onClosed) {
-      api.notifications.onClosed.addListener((notificationId, byUser) => {
-        dispatcher.request("notifications.event", {
-          kind: "closed", notification_id: notificationId,
-          by_user: !!byUser,
-        }).catch(() => {});
-      });
-    }
+    // No outbound listeners. Kept as a no-op so callers don't have to
+    // branch on the module shape.
   }
 
   dispatcher.register("notifications.show", async (msg) => {

@@ -26,7 +26,7 @@ The bridge's `qdistro.handshake` op already exists: returns `{session_secret_hex
 |---|---|---|
 | `mpris.update` | `mpris.publish` | Rename in extension |
 | `downloads.update` | `downloads.notify` | Rename in extension |
-| `notifications.event` | (no handler) | Bridge gap — extension drops the op until bridge adds it |
+| `notifications.event` | (no handler) | **Dropped 2026-05-16** — extension no longer emits it. Re-add if bridge ever ships a handler. |
 
 ### Field renames within those ops
 
@@ -64,7 +64,7 @@ The existing extension behavior (inbound `notifications.show` from the bridge �
 
 3. **Op renames** — `mpris.update` → `mpris.publish`, `downloads.update` → `downloads.notify`. Field renames per the tables above. Tests updated.
 
-4. **Drop `notifications.event`** — no bridge handler exists. The click/close listeners in `notifications.js` still call dispatcher.request but the bridge will reply `unknown_op` — silent. Either drop the listeners or have them log-and-discard. Drop for now; future bridge expansion can re-add a `notifications.event` op.
+4. **Drop `notifications.event`** — **Done 2026-05-16.** Listeners removed from `src/modules/notifications.js`; tests pinned to confirm no outbound emission on click/close. Future bridge expansion can re-add a `notifications.event` op and rewire the listeners.
 
 5. **Tests** — re-pin every changed wire shape. Both repos.
 
