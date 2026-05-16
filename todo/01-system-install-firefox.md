@@ -62,7 +62,7 @@ For a production qdistro install: **AMO-sign the xpi** via `web-ext sign --api-k
 
 2. **`scripts/install-native-host.sh --system` already exists** — keep it as the system-wide native-host installer.
 
-3. **`scripts/build-extension.sh`** — add `--sign` flag that shells out to `web-ext sign` if `WEB_EXT_API_KEY` + `WEB_EXT_API_SECRET` are set; emits both `dist/firefox.xpi` (unsigned) and `dist/firefox-signed.xpi`.
+3. **`scripts/build-extension.sh`** — **Scaffolded 2026-05-16.** `--sign` flag shells out to `web-ext sign --channel=unlisted` when `WEB_EXT_API_KEY` + `WEB_EXT_API_SECRET` are set and `web-ext` is on PATH; warns and skips otherwise. Emits `dist/firefox.xpi` (unsigned, always) and `dist/firefox-signed.xpi` (when signing succeeds). The actual sign has not been run yet — needs AMO credentials.
 
 4. **An rpm/deb package** (or a `justfile` deploy target) that drops:
    ```

@@ -43,6 +43,12 @@ npm install
 npm run build
 # → dist/firefox/      unpacked tree (use about:debugging "Load Temporary Add-on")
 # → dist/firefox.xpi   packed for AMO submission / signed install
+
+# AMO-sign the xpi (unlisted channel). Requires WEB_EXT_API_KEY and
+# WEB_EXT_API_SECRET in the env and the `web-ext` CLI on PATH; without
+# them the flag warns and skips. Emits dist/firefox-signed.xpi
+# alongside the unsigned xpi.
+WEB_EXT_API_KEY=... WEB_EXT_API_SECRET=... bash scripts/build-extension.sh --sign
 ```
 
 ## Test
