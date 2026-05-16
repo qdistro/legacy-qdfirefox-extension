@@ -11,6 +11,8 @@ This directory tracks deferred items in qdfirefox-extension. Sibling list at `..
 | [05-screenlock-content-script.md](05-screenlock-content-script.md) | Fullscreen observer | `fullscreenchange` listener → screenlock.inhibit/release |
 | [06-intent-token-hmac.md](06-intent-token-hmac.md) | Real intent tokens | `crypto.subtle` HMAC, `qdistro.handshake` round-trip, TTL+nonce store |
 | [07-ui-tests.md](07-ui-tests.md) | UI/glue coverage | jsdom tests for background.js / popup.js / options.js |
+| [08-bridge-protocol-alignment.md](08-bridge-protocol-alignment.md) | Bridge protocol audit | Discovered + landed alignment with `qdistro_browser_bridge.py` (token shape, op renames, handshake). Partly done. |
+| [09-page-extract-request-usage.md](09-page-extract-request-usage.md) | `page.extract.request` usage guide | How daemons read tab content; modes, errors, calling pattern, security model |
 
 ## Status snapshot (as of 2026-05-16)
 

@@ -35,6 +35,65 @@
     };
   }
 
+  // Runs in the page context. Mode-driven content snapshot for
+  // bridge-initiated page.extract.request.
+  function captureByModeFn(mode, selector) {
+    const cap = {
+      mode,
+      url: location.href,
+      title: document.title,
+      content: "",
+      truncated: false,
+    };
+    const MAX = 256 * 1024; // 256KB cap so we don't drown the bridge.
+    function trim(s) {
+      if (typeof s !== "string") return "";
+      if (s.length > MAX) {
+        cap.truncated = true;
+        return s.slice(0, MAX);
+      }
+      return s;
+    }
+    switch (mode) {
+      case "selection":
+        cap.content = trim(
+          (window.getSelection && window.getSelection().toString()) || "");
+        break;
+      case "visible_text":
+        cap.content = trim(document.body ? document.body.innerText || "" : "");
+        break;
+      case "full_text":
+        cap.content = trim(document.documentElement
+          ? document.documentElement.textContent || "" : "");
+        break;
+      case "outer_html":
+        cap.content = trim(document.documentElement
+          ? document.documentElement.outerHTML || "" : "");
+        break;
+      case "by_selector": {
+        const sel = String(selector || "");
+        if (!sel) {
+          cap.error = "missing_selector";
+          return cap;
+        }
+        try {
+          const el = document.querySelector(sel);
+          cap.content = trim(el ? el.innerText || el.textContent || "" : "");
+          cap.matched = !!el;
+        } catch (e) {
+          cap.error = "bad_selector";
+        }
+        break;
+      }
+      case "title":
+        cap.content = cap.title;
+        break;
+      default:
+        cap.error = "unknown_mode";
+    }
+    return cap;
+  }
+
   async function capture(tabId) {
     const captured = await executeInTab(tabId, captureSelectionFn);
     return captured || { selected_text: "", url: "", title: "" };
@@ -73,5 +132,50 @@
     });
   }
 
-  root.qdistroPageExtract = { extract, capture, installContextMenu };
+  // Bridge-initiated extraction. Bridge sends:
+  //   {op: "page.extract.request", request_id, tab_id, mode, selector?}
+  // Modes:
+  //   selection / visible_text / full_text / outer_html / by_selector / title
+  // No intent token here — the bridge gates incoming D-Bus callers
+  // via _identity_gate (peer selinux context). Symmetric with the
+  // tabs.list / tabs.open / tabs.close bridge → ext path.
+  dispatcher.register("page.extract.request", async (msg) => {
+    const tabId = msg.tab_id;
+    const mode = String(msg.mode || "visible_text");
+    if (typeof tabId !== "number") {
+      return { ok: false, error: "missing_tab_id" };
+    }
+    try {
+      const captured = await executeInTab(
+        tabId, captureByModeFn, [mode, msg.selector || ""]);
+      if (!captured) {
+        return { ok: false, error: "capture_returned_empty" };
+      }
+      if (captured.error) {
+        return { ok: false, error: captured.error, mode, url: captured.url };
+      }
+      return {
+        mode: captured.mode,
+        url: captured.url || "",
+        title: captured.title || "",
+        content: captured.content || "",
+        truncated: !!captured.truncated,
+        ...(typeof captured.matched === "boolean"
+          ? { matched: captured.matched } : {}),
+      };
+    } catch (e) {
+      return { ok: false, error: "executeScript_failed",
+               detail: String(e.message || e).slice(0, 200) };
+    }
+  });
+
+  async function extractByMode(tabId, mode, selector) {
+    const captured = await executeInTab(tabId, captureByModeFn,
+      [mode, selector || ""]);
+    return captured || { content: "", url: "", title: "", mode };
+  }
+
+  root.qdistroPageExtract = {
+    extract, capture, installContextMenu, extractByMode,
+  };
 })(typeof self !== "undefined" ? self : globalThis);
