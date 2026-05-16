@@ -23,7 +23,7 @@ describe("qdistroPageExtract", () => {
   });
 
   it("extract() forwards the captured payload to the bridge", async () => {
-    const token = env.scope.qdistroIntent.mint("page.extract");
+    const token = await env.scope.qdistroIntent.mint("page.extract");
     env.scope.qdistroPageExtract.extract(7, "selection", token);
     const req = await vi.waitFor(
       () => {
@@ -39,7 +39,9 @@ describe("qdistroPageExtract", () => {
       title: "X",
       destination: "selection",
     });
-    expect(req.intent_token.nonce).toBeTruthy();
+    expect(req.intent_token.request_id).toBeTruthy();
+    expect(req.intent_token.op).toBe("page.extract");
+    expect(req.intent_token.hmac).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it("installContextMenu() registers the qdistro-share-to entry", () => {

@@ -20,6 +20,26 @@
 
 const api = self.qdistroApi;
 
+// Handshake fires the moment a port becomes live (boot, reconnect).
+// Replaces any prior session secret with the fresh per-port one the
+// bridge minted. Privileged-op sites await `qdistroIntent.hasSession()`
+// before calling `mint()` — if the handshake hasn't completed yet,
+// the op throws `intent_no_session` which the caller surfaces.
+async function runHandshake() {
+  try {
+    const reply = await self.qdistroDispatcher.request("qdistro.handshake", {
+      proto_version: 1,
+    }, { timeoutMs: 5000 });
+    if (reply && reply.ok && typeof reply.session_secret_hex === "string") {
+      self.qdistroIntent.setSessionSecretHex(reply.session_secret_hex);
+    } else {
+      console.warn("[qdistro/background] handshake reply missing secret", reply);
+    }
+  } catch (e) {
+    console.warn("[qdistro/background] handshake failed", e && e.message);
+  }
+}
+
 function bootOnce() {
   if (self.__qdistroBooted) return;
   self.__qdistroBooted = true;
@@ -28,6 +48,9 @@ function bootOnce() {
   if (self.qdistroDownloads)   self.qdistroDownloads.install();
   if (self.qdistroNotifications) self.qdistroNotifications.install();
 
+  // Handshake on every (re)connect — bridge rotates its secret on
+  // each launch, so a stale extension secret won't pass verification.
+  self.qdistroPort.onConnected(runHandshake);
   self.qdistroPort.connect();
 }
 
@@ -80,7 +103,7 @@ if (api && api.runtime && api.runtime.onMessage) {
             return { ok: true, response: r };
           }
           case "cookies.export": {
-            const intent = self.qdistroIntent.mint("cookies.export");
+            const intent = await self.qdistroIntent.mint("cookies.export");
             const opts = req.cookie_store_id
               ? { cookieStoreId: req.cookie_store_id } : {};
             const r = await self.qdistroCookies.exportForUrl(req.url, intent, opts);
@@ -99,7 +122,7 @@ if (api && api.runtime && api.runtime.onMessage) {
           // todo/06-intent-token-hmac.md).
 
           case "pwd.request_fill": {
-            const intent = self.qdistroIntent.mint("pwd.fill");
+            const intent = await self.qdistroIntent.mint("pwd.fill");
             const r = await self.qdistroPwd.fill(
               req.url || (sender.url || ""),
               req.username || null,
@@ -108,7 +131,7 @@ if (api && api.runtime && api.runtime.onMessage) {
             return { ok: true, response: r };
           }
           case "pwd.request_save": {
-            const intent = self.qdistroIntent.mint("pwd.save");
+            const intent = await self.qdistroIntent.mint("pwd.save");
             const r = await self.qdistroPwd.save(
               req.url || (sender.url || ""),
               req.username || null,

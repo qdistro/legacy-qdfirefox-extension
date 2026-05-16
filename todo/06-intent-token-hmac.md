@@ -1,4 +1,7 @@
-# 06 — Real intent tokens (HMAC via crypto.subtle)
+# 06 — Real intent tokens (HMAC via crypto.subtle) — DONE 2026-05-16
+
+> Initial implementation landed alongside [08-bridge-protocol-alignment.md](08-bridge-protocol-alignment.md). Token shape, HMAC mint, and handshake-on-connect are in place. Open items: replay-resistance accounting (bridge enforces single-use; extension should also drop a fresh request_id per send to avoid client-side replays — currently relies on `crypto.getRandomValues` for uniqueness). Cross-session secret rotation handled by re-handshake on every reconnect.
+
 
 ## Why
 

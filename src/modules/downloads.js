@@ -14,17 +14,20 @@
   const api = root.qdistroApi;
   const dispatcher = root.qdistroDispatcher;
 
+  // Wire op is `downloads.notify` (NOT `downloads.update`) per the
+  // bridge handler's whitelist: (download_id, filename, state,
+  // bytes_received, total_bytes, url, mime). We rename `id` →
+  // `download_id` at snapshot time so the wire shape lines up.
   function snapshot(item) {
     if (!item) return null;
     return {
-      id: item.id,
+      download_id: item.id,
       url: item.url || item.finalUrl || "",
       filename: item.filename || "",
       state: item.state || "in_progress",
       total_bytes: item.totalBytes || 0,
       bytes_received: item.bytesReceived || 0,
       mime: item.mime || "",
-      start_time: item.startTime || null,
     };
   }
 
@@ -37,7 +40,7 @@
         const items = await api.downloads.search({ id: delta.id });
         const item = items && items[0];
         if (!item) return;
-        dispatcher.request("downloads.update", snapshot(item))
+        dispatcher.request("downloads.notify", snapshot(item))
           .catch(() => { /* fire-and-forget */ });
       } catch (_) {
         /* ignore — listener must not throw */

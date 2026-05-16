@@ -45,7 +45,7 @@ describe("background runtime.onMessage", () => {
       expect(req.url).toBe("https://example.com/login");
       expect(req.username).toBe("alice");
       expect(req.intent_token).toBeTruthy();
-      expect(req.intent_token.operation).toBe("pwd.fill");
+      expect(req.intent_token.op).toBe("pwd.fill");
       env.port.deliver({
         op: "pwd.fill.reply", request_id: req.request_id, ok: true,
         credentials: [{ username: "alice", password: "secret" }],
@@ -72,7 +72,7 @@ describe("background runtime.onMessage", () => {
         username: "alice",
         password: "s3cret!",
       });
-      expect(req.intent_token.operation).toBe("pwd.save");
+      expect(req.intent_token.op).toBe("pwd.save");
       env.port.deliver({
         op: "pwd.save.reply", request_id: req.request_id, ok: true, saved: true,
       });
@@ -82,7 +82,7 @@ describe("background runtime.onMessage", () => {
   });
 
   describe("mpris content-script entry point", () => {
-    it("mpris.report_update forwards as mpris.update (fire-and-forget)", async () => {
+    it("mpris.report_update forwards as mpris.publish (fire-and-forget)", async () => {
       const r = await env.sendMessage({
         kind: "mpris.report_update",
         title: "Song", artist: "Artist", state: "playing",
@@ -90,13 +90,12 @@ describe("background runtime.onMessage", () => {
       });
       expect(r).toEqual({ ok: true });
       const req = await vi.waitFor(() => {
-        const m = env.port.sent.find((x) => x.op === "mpris.update");
-        if (!m) throw new Error("mpris.update not yet sent");
+        const m = env.port.sent.find((x) => x.op === "mpris.publish");
+        if (!m) throw new Error("mpris.publish not yet sent");
         return m;
       }, { timeout: 1000 });
       expect(req).toMatchObject({
-        title: "Song", artist: "Artist", state: "playing",
-        url: "https://music.example/",
+        title: "Song", artist: "Artist", playback_status: "playing",
       });
     });
 
@@ -106,8 +105,8 @@ describe("background runtime.onMessage", () => {
         { id: env.scope.browser.runtime.id, tab: { id: 42 } },
       );
       const req = await vi.waitFor(() => {
-        const m = env.port.sent.find((x) => x.op === "mpris.update");
-        if (!m) throw new Error("mpris.update not yet sent");
+        const m = env.port.sent.find((x) => x.op === "mpris.publish");
+        if (!m) throw new Error("mpris.publish not yet sent");
         return m;
       }, { timeout: 1000 });
       expect(req.tab_id).toBe(42);

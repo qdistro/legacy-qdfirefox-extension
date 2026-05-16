@@ -161,6 +161,14 @@ export function loadExtension(opts = {}) {
   evalFile("port.js");
   evalFile("dispatcher.js");
   evalFile("intent.js");
+  // Seed a default session secret so tests that call mint() don't
+  // need to drive a full qdistro.handshake first. Tests can call
+  // setSessionSecretHex(null) to exercise the pre-handshake path.
+  if (!opts.skipSessionSecret) {
+    scope.qdistroIntent.setSessionSecretHex(
+      "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    );
+  }
   evalFile("modules/tabs.js");
   evalFile("modules/pwd.js");
   evalFile("modules/pageExtract.js");

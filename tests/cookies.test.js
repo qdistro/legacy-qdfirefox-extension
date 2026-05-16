@@ -21,7 +21,7 @@ describe("qdistroCookies", () => {
   });
 
   it("serializes cookies with snake_case fields and store_id", async () => {
-    const token = env.scope.qdistroIntent.mint("cookies.export");
+    const token = await env.scope.qdistroIntent.mint("cookies.export");
     const p = env.scope.qdistroCookies.exportForUrl("https://example.com/", token);
     // exportForUrl awaits getAllForUrl → cookies.getAll, then dispatcher.request
     // → port.send. That's a 2-hop microtask chain; vi.waitFor polls until the
@@ -53,7 +53,7 @@ describe("qdistroCookies", () => {
     browser.cookies.getAll = (q) => { captured = q; return Promise.resolve([]); };
     const env2 = loadExtension({ browser, portHandle: makeFakePort() });
     env2.scope.qdistroPort.connect();
-    const token = env2.scope.qdistroIntent.mint("cookies.export");
+    const token = await env2.scope.qdistroIntent.mint("cookies.export");
     env2.scope.qdistroCookies.exportForUrl("https://example.com/", token);
     await vi.waitFor(() => {
       if (!captured) throw new Error("getAll not yet called");
@@ -70,7 +70,7 @@ describe("qdistroCookies", () => {
     browser.cookies.getAll = (q) => { captured = q; return Promise.resolve([]); };
     const env2 = loadExtension({ browser, portHandle: makeFakePort() });
     env2.scope.qdistroPort.connect();
-    const token = env2.scope.qdistroIntent.mint("cookies.export");
+    const token = await env2.scope.qdistroIntent.mint("cookies.export");
     env2.scope.qdistroCookies.exportForUrl("https://example.com/", token, {
       cookieStoreId: "firefox-container-3",
     });
@@ -85,7 +85,7 @@ describe("qdistroCookies", () => {
     browser.cookies = undefined;
     const env2 = loadExtension({ browser, portHandle: makeFakePort() });
     env2.scope.qdistroPort.connect();
-    const token = env2.scope.qdistroIntent.mint("cookies.export");
+    const token = await env2.scope.qdistroIntent.mint("cookies.export");
     await expect(env2.scope.qdistroCookies.exportForUrl("https://x/", token))
       .rejects.toThrow(/cookies_api_unavailable/);
   });

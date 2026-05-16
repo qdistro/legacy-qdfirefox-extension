@@ -35,6 +35,7 @@
     lastHeartbeatAt: 0,
     listeners: new Set(),
     statusListeners: new Set(),
+    connectedListeners: new Set(),
   };
 
   function log(...args) {
@@ -106,6 +107,12 @@
       port.onDisconnect.addListener(onDisconnect);
       armHeartbeatWatchdog();
       setStatus({ connected: true });
+      // Fire onConnected hooks (handshake, etc.) — these run after
+      // the port is wired and isConnected() returns true, so a hook
+      // can immediately dispatcher.request() against a fresh secret.
+      for (const cb of state.connectedListeners) {
+        try { cb(); } catch (e) { log("onConnected hook threw", e); }
+      }
     } catch (e) {
       log("connectNative threw", e);
       state.connected = false;
@@ -140,12 +147,14 @@
 
   function onMessageRegister(cb) { state.listeners.add(cb); }
   function onStatus(cb) { state.statusListeners.add(cb); }
+  function onConnected(cb) { state.connectedListeners.add(cb); }
 
   root.qdistroPort = {
     connect,
     send,
     onMessage: onMessageRegister,
     onStatus,
+    onConnected,
     isConnected: () => state.connected,
     _resetForTests: () => {
       if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
@@ -157,6 +166,7 @@
       state.heartbeatTimer = null;
       state.listeners.clear();
       state.statusListeners.clear();
+      state.connectedListeners.clear();
     },
     _state: state,
   };

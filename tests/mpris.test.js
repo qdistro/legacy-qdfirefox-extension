@@ -17,9 +17,24 @@ describe("qdistroMpris", () => {
     expect(reply).toMatchObject({ ok: true, action: "play", stub: true });
   });
 
-  it("update() sends mpris.update with the given payload", () => {
-    env.scope.qdistroMpris.update({ title: "Song", state: "playing" });
-    const req = env.port.sent.find((m) => m.op === "mpris.update");
-    expect(req).toMatchObject({ title: "Song", state: "playing" });
+  it("update() sends mpris.publish with bridge-shaped fields", () => {
+    env.scope.qdistroMpris.update({
+      title: "Song", artist: "A", album: "B",
+      state: "playing", position: 12, tab_id: 7,
+    });
+    const req = env.port.sent.find((m) => m.op === "mpris.publish");
+    expect(req).toMatchObject({
+      title: "Song", artist: "A", album: "B",
+      playback_status: "playing",
+      position_us: 12000000,
+      tab_id: 7,
+    });
+  });
+
+  it("update() defaults playback_status to 'none' and position_us to 0", () => {
+    env.scope.qdistroMpris.update({ title: "X" });
+    const req = env.port.sent.find((m) => m.op === "mpris.publish");
+    expect(req.playback_status).toBe("none");
+    expect(req.position_us).toBe(0);
   });
 });
