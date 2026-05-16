@@ -7,13 +7,13 @@
 | `src/background.js` | `tests/background.test.js` — runtime.onMessage entry points + content-script forward paths (no startup/install events yet) |
 | `src/popup.js` | `tests/popup.test.js` (jsdom) — status load, container dropdown, ping, cookies-export with/without container, no-active-tab, settings link, rejection handling |
 | `src/options.js` | `tests/options.test.js` (jsdom) — defaults, storage reflection, allowlist parse, save round-trip, Saved-indicator flash, containers checkbox present |
-| `src/content/pwd-content.js` | **uncovered** — needs a jsdom harness that synthesizes a `<form>` with password + username, fires focus, asserts the `runtime.sendMessage({kind:"pwd.request_fill"})`. The iframe path (post-`all_frames:true`) also wants a nested-document case. |
-| `src/content/mpris-content.js` | **uncovered** — needs a jsdom harness with a `navigator.mediaSession` shim. |
-| `src/content/screenlock-content.js` | **uncovered** — needs a jsdom harness firing `fullscreenchange` against a stub `document.fullscreenElement`. |
+| `src/content/pwd-content.js` | `tests/pwd-content.test.js` (jsdom) — focus on password fires `pwd.request_fill`; single-cred auto-fills + dispatches input/change; multi-cred renders the picker and clicking a row fills + closes; submit-after-unchanged stays silent; submit-after-edit fires `pwd.request_save`; empty password is a no-op |
+| `src/content/mpris-content.js` | `tests/mpris-content.test.js` (jsdom) — no-media skips reports; with media, snapshot is sent with metadata-or-document-title fallback; play/pause events force an immediate report; duplicate snapshots are suppressed; inbound `mpris.do_action` for play/pause/seek invokes the right HTMLMediaElement method; next/previous reply `action_unsupported_by_page`; unknown action replies `unknown_action`; no media replies `no_media_element` |
+| `src/content/screenlock-content.js` | `tests/screenlock-content.test.js` (jsdom) — fullscreen entry classifies presentation vs video (incl. nested playing video); paused video classifies as presentation; exit after inhibit reports release; exit without inhibit is silent; pagehide releases when active; pagehide is a no-op otherwise; `webkitfullscreenchange` also drives the listener |
 
 ## Remaining gap
 
-Three content scripts, ~250 LOC, still unpinned. Notes on each follow.
+None of the source files are uncovered now. Iframe-specific tests for pwd-content (top-vs-iframe `location.href`) could still be added but require a multi-document jsdom setup; defer until a regression shows.
 
 ## Plan
 
