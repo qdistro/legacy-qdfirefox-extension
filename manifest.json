@@ -19,6 +19,7 @@
     "contextMenus",
     "contextualIdentities",
     "scripting",
+    "webNavigation",
     "storage"
   ],
   "host_permissions": [
