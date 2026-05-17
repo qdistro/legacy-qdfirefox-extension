@@ -52,4 +52,37 @@ describe("manifest.json permissions (P04-E parity)", () => {
   it("MV3 host_permissions covers all urls", () => {
     expect(manifest.host_permissions).toContain("<all_urls>");
   });
+
+  // P04 fix-pass S4 (test-integrity): closed-set assertion so a
+  // future commit silently adding ``management`` / ``proxy`` /
+  // ``bookmarks`` etc. fails the test. The full set of acceptable
+  // permissions for this extension is pinned here. New permissions
+  // require updating this allowlist + a security review.
+  it("permissions set is closed — no silently-added permissions", () => {
+    const expected = new Set([
+      "nativeMessaging",
+      "tabs",
+      "activeTab",
+      "cookies",
+      "downloads",
+      "notifications",
+      "contextMenus",
+      "contextualIdentities",
+      "scripting",
+      "webNavigation",
+      "storage",
+    ]);
+    const actual = new Set(manifest.permissions || []);
+    for (const p of actual) {
+      expect(
+        expected.has(p),
+        `unexpected permission ${p} — update the closed-set allowlist after security review`,
+      ).toBe(true);
+    }
+    // And confirm every expected permission is present, so a future
+    // commit also can't silently DROP a load-bearing one.
+    for (const p of expected) {
+      expect(actual.has(p), `missing permission ${p}`).toBe(true);
+    }
+  });
 });
