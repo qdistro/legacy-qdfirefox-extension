@@ -63,4 +63,34 @@ describe("qdistroPwd", () => {
     expect(r.ok).toBe(true);
     expect(r.credentials).toHaveLength(1);
   });
+
+  // P04-C: autofill_denied error round-trips so the content script
+  // can surface the right UI affordance.
+  it("fill() surfaces autofill_denied as ok:false", async () => {
+    const p = env.scope.qdistroPwd.fill("https://example.com/", null, { nonce: "n5" });
+    const req = env.port.sent.find((m) => m.op === "pwd.fill");
+    env.port.deliver({
+      op: "pwd.fill.reply",
+      request_id: req.request_id,
+      ok: false,
+      error: "autofill_denied",
+    });
+    const r = await p;
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("autofill_denied");
+  });
+
+  it("fill() surfaces vault_locked as ok:false", async () => {
+    const p = env.scope.qdistroPwd.fill("https://example.com/", null, { nonce: "n6" });
+    const req = env.port.sent.find((m) => m.op === "pwd.fill");
+    env.port.deliver({
+      op: "pwd.fill.reply",
+      request_id: req.request_id,
+      ok: false,
+      error: "vault_locked",
+    });
+    const r = await p;
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("vault_locked");
+  });
 });

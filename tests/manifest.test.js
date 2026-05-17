@@ -28,3 +28,28 @@ describe("manifest.json content_scripts", () => {
     expect(others.js).not.toContain("src/content/pwd-content.js");
   });
 });
+
+// P04-E parity check — P0-5 fix. The pwd.fill content script
+// needs scripting + webNavigation to inject into freshly-navigated
+// frames. Both must be declared.
+describe("manifest.json permissions (P04-E parity)", () => {
+  it("declares nativeMessaging for the bridge port", () => {
+    expect(manifest.permissions).toContain("nativeMessaging");
+  });
+
+  it("declares scripting for pwd-content injection", () => {
+    expect(manifest.permissions).toContain("scripting");
+  });
+
+  it("declares webNavigation for pwd-fill on freshly navigated frames", () => {
+    expect(manifest.permissions).toContain("webNavigation");
+  });
+
+  it("keeps contextualIdentities (Firefox containers)", () => {
+    expect(manifest.permissions).toContain("contextualIdentities");
+  });
+
+  it("MV3 host_permissions covers all urls", () => {
+    expect(manifest.host_permissions).toContain("<all_urls>");
+  });
+});
