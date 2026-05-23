@@ -13,6 +13,7 @@
 // @ts-check
 import fs from "node:fs";
 import path from "node:path";
+import { webcrypto } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -128,6 +129,7 @@ export function loadExtension(opts = {}) {
   scope.self = scope;
   scope.console = console;
   scope.browser = fakeBrowser;
+  scope.crypto = globalThis.crypto || webcrypto;
   scope.setTimeout = setTimeout;
   scope.clearTimeout = clearTimeout;
   scope.setInterval = setInterval;
