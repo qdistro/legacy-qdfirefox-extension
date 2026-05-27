@@ -75,4 +75,43 @@ describe("qdistroDispatcher", () => {
     expect(reply.error).toBe("handler_raised");
     expect(reply.detail).toMatch(/kaboom/);
   });
+
+  it("routes inbound ops with string request_id (bridge format)", async () => {
+    env.scope.qdistroDispatcher.register("tabs.list", async () => ({
+      tabs: [{ id: 1 }],
+    }));
+    await env.scope.qdistroDispatcher.handleInbound({
+      op: "tabs.list", request_id: "r1-abc12345",
+    });
+    const reply = env.port.sent.find(
+      (m) => m.op === "tabs.list.reply" && m.request_id === "r1-abc12345");
+    expect(reply).toBeTruthy();
+    expect(reply.ok).toBe(true);
+    expect(reply.tabs).toEqual([{ id: 1 }]);
+  });
+
+  it("sends error reply for unknown op with string request_id", async () => {
+    await env.scope.qdistroDispatcher.handleInbound({
+      op: "no.such.op", request_id: "r99-deadbeef",
+    });
+    const reply = env.port.sent.find(
+      (m) => m.op === "no.such.op.reply" && m.request_id === "r99-deadbeef");
+    expect(reply).toBeTruthy();
+    expect(reply.ok).toBe(false);
+    expect(reply.error).toBe("unknown_op");
+  });
+
+  it("sends error reply when handler throws with string request_id", async () => {
+    env.scope.qdistroDispatcher.register("throw.op", async () => {
+      throw new Error("boom");
+    });
+    await env.scope.qdistroDispatcher.handleInbound({
+      op: "throw.op", request_id: "r2-00ff00ff",
+    });
+    const reply = env.port.sent.find(
+      (m) => m.op === "throw.op.reply" && m.request_id === "r2-00ff00ff");
+    expect(reply).toBeTruthy();
+    expect(reply.ok).toBe(false);
+    expect(reply.error).toBe("handler_raised");
+  });
 });

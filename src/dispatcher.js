@@ -3,10 +3,12 @@
 // Two flows:
 //
 //   1. Bridge-initiated request (daemon → bridge → extension):
-//      bridge sends `{op: "tabs.list", request_id: N}` over the port.
+//      bridge sends `{op: "tabs.list", request_id: "rN-hex"}` over
+//      the port. request_id is a string (e.g. "r1-abc123"); the
+//      dispatcher accepts any truthy value (`!= null`).
 //      Dispatcher routes by op to a registered handler in
 //      src/modules/, awaits the handler's reply payload, then sends
-//      `{op: "tabs.list.reply", request_id: N, ...payload}` back.
+//      `{op: "tabs.list.reply", request_id: "rN-hex", ...payload}` back.
 //
 //   2. Extension-initiated request (popup click → extension → bridge → daemon):
 //      caller invokes `qdistroDispatcher.request("cookies.export", body)`
@@ -43,7 +45,7 @@
     const op = String(msg.op || "");
     if (!op) return;
 
-    if (op.endsWith(".reply") && typeof msg.request_id === "number") {
+    if (op.endsWith(".reply") && msg.request_id != null) {
       const slot = pending.get(msg.request_id);
       if (!slot) {
         log("orphan reply", op, msg.request_id);
@@ -58,7 +60,7 @@
     const h = handlers.get(op);
     if (!h) {
       log("no handler for inbound op", op);
-      if (typeof msg.request_id === "number") {
+      if (msg.request_id != null) {
         port.send({
           op: `${op}.reply`,
           request_id: msg.request_id,
@@ -70,7 +72,7 @@
     }
     try {
       const body = (await h(msg)) || {};
-      if (typeof msg.request_id === "number") {
+      if (msg.request_id != null) {
         port.send({
           op: `${op}.reply`,
           request_id: msg.request_id,
@@ -80,7 +82,7 @@
       }
     } catch (e) {
       log("handler threw", op, e);
-      if (typeof msg.request_id === "number") {
+      if (msg.request_id != null) {
         port.send({
           op: `${op}.reply`,
           request_id: msg.request_id,
