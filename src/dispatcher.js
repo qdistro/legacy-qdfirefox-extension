@@ -51,6 +51,10 @@
         log("orphan reply", op, msg.request_id);
         return;
       }
+      if (op !== `${slot.op}.reply`) {
+        log("mismatched reply", op, "expected", `${slot.op}.reply`, msg.request_id);
+        return;
+      }
       pending.delete(msg.request_id);
       if (slot.timer) clearTimeout(slot.timer);
       slot.resolve(msg);

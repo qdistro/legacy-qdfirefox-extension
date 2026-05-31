@@ -26,6 +26,24 @@ describe("qdistroDispatcher", () => {
     expect(r.tabs).toHaveLength(1);
   });
 
+  it("ignores replies whose op does not match the pending request", async () => {
+    const p = env.scope.qdistroDispatcher.request("tabs.list");
+    const sent = env.port.sent.find((m) => m.op === "tabs.list");
+    env.port.deliver({
+      op: "cookies.export.reply",
+      request_id: sent.request_id,
+      ok: true,
+    });
+    env.port.deliver({
+      op: "tabs.list.reply",
+      request_id: sent.request_id,
+      ok: true,
+      tabs: [],
+    });
+    const r = await p;
+    expect(r.op).toBe("tabs.list.reply");
+  });
+
   it("routes inbound ops to registered handlers", async () => {
     env.scope.qdistroDispatcher.register("dummy.op", async (msg) => ({
       received_args: msg.args || null,
