@@ -7,11 +7,17 @@
 //
 // Flow:
 //
-//   1. Listen for a *trusted user gesture* on <input type="password">
-//      (a real click or keydown, event.isTrusted === true). A bare
-//      programmatic/synthetic focus from page script is ignored — a
-//      phishing page must not be able to trigger credential delivery
-//      (finding #10).
+//   1. Listen for an *explicit, trusted user click* on
+//      <input type="password"> (event.isTrusted === true). We do NOT
+//      fire on blanket keydown (that spammed a fresh request_fill per
+//      keystroke and re-anchored the picker over the field the user
+//      was typing into) and we do NOT fire on focus (focus can be
+//      moved by page script). A bare programmatic/synthetic event is
+//      ignored — a phishing page must not be able to trigger
+//      credential delivery (finding #10).
+//      We also suppress the request when a picker is already open for
+//      the same input or the field is already non-empty, so a normal
+//      type-your-password flow produces ZERO fill requests.
 //   2. Send {kind: "pwd.request_fill", url, username?} to background.
 //   3. Background derives the URL from sender.tab.url (rejecting any
 //      page-supplied mismatch), mints an intent token, calls
@@ -80,13 +86,20 @@
     lastFilledFor = passwordInput;
   }
 
+  // The password input the picker is currently anchored to (or null).
+  // Used to avoid re-requesting/re-rendering while a picker is already
+  // open for the same field.
+  let pickerOpenFor = null;
+
   function removePicker() {
     const old = document.getElementById("qdistro-pwd-picker");
     if (old) old.remove();
+    pickerOpenFor = null;
   }
 
   function renderPicker(passwordInput, credentials) {
     removePicker();
+    pickerOpenFor = passwordInput;
     const rect = passwordInput.getBoundingClientRect();
     const box = document.createElement("div");
     box.id = "qdistro-pwd-picker";
@@ -157,15 +170,26 @@
     return null;
   }
 
-  // Entry point: a TRUSTED user gesture on/near a password field.
-  // Untrusted (script-dispatched) events are ignored — a page must
-  // not be able to provoke credential delivery without a real user
-  // action. We request credentials but never auto-fill; the user
+  // Entry point: an EXPLICIT, TRUSTED user click on/near a password
+  // field. Untrusted (script-dispatched) events are ignored — a page
+  // must not be able to provoke credential delivery without a real
+  // user action. We request credentials but never auto-fill; the user
   // must confirm by clicking a picker row.
   async function onPasswordGesture(ev) {
     if (!ev || ev.isTrusted !== true) return; // reject synthetic events
     const el = passwordInputForGesture(ev);
     if (!el) return;
+    // Don't re-request / re-render while a picker is already open for
+    // this same input — otherwise the picker would flicker over the
+    // field on every interaction (finding #10 follow-up).
+    if (pickerOpenFor === el && document.getElementById("qdistro-pwd-picker")) {
+      return;
+    }
+    // The user is offering to *fill* an empty field. If the field is
+    // already non-empty (e.g. they are typing a password by hand, or
+    // already chose a credential), do nothing: no fill request, no
+    // picker over the text they're entering.
+    if (el.value) return;
     // Throttle: one in-flight request per gesture burst.
     const now = Date.now();
     if (now - lastGestureAt < 250) return;
@@ -191,6 +215,14 @@
   }
 
   function onSubmit(ev) {
+    // Gesture gate (finding #10): only a TRUSTED submit (a real
+    // click on the submit button, Enter in a field, or the browser's
+    // own form submission) may offer to save a credential. A page can
+    // call form.dispatchEvent(new Event("submit")) or form.submit()
+    // with attacker-chosen username/password; honoring that would let
+    // it silently poison the user's credential store for the REAL
+    // origin. Reject synthetic submits.
+    if (!ev || ev.isTrusted !== true) return;
     const form = ev.target;
     if (!(form instanceof HTMLFormElement)) return;
     const passwordInput = Array.from(form.elements).find(
@@ -214,12 +246,18 @@
     });
   }
 
-  // Trigger on real user gestures only (click / keydown). We do NOT
-  // listen for `focus`: focus can be moved programmatically by page
-  // script, which would let a phishing page provoke credential
-  // delivery without any user action (finding #10).
+  // Trigger on an explicit, real user CLICK only. We deliberately do
+  // NOT listen for:
+  //   - `focus`: focus can be moved programmatically by page script,
+  //     which would let a phishing page provoke credential delivery
+  //     without any user action (finding #10).
+  //   - `keydown`: a blanket keydown listener fired a fresh
+  //     pwd.request_fill on every keystroke into the field and
+  //     re-rendered the picker over the text the user was typing.
+  //     Normal typing must produce ZERO fill requests (finding #10
+  //     follow-up). A click on the (empty) field is the explicit
+  //     intent to autofill.
   document.addEventListener("click", onPasswordGesture, true);
-  document.addEventListener("keydown", onPasswordGesture, true);
   document.addEventListener("submit", onSubmit, true);
   log("pwd content-script loaded");
 })();

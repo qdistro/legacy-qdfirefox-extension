@@ -149,8 +149,14 @@ describe("background runtime.onMessage", () => {
     });
 
     it("ALLOWS the popup and derives URL + store id from the active tab (ignores req fields)", async () => {
-      env.scope.browser.tabs.query = (_q) =>
-        Promise.resolve([{ id: 1, url: "https://real-active.example/", cookieStoreId: "firefox-container-5" }]);
+      // A SINGLE tabs.query must yield both url and cookieStoreId — two
+      // separate queries had a TOCTOU window and were redundant
+      // (finding #10 follow-up / Problem 3).
+      let queryCalls = 0;
+      env.scope.browser.tabs.query = (_q) => {
+        queryCalls += 1;
+        return Promise.resolve([{ id: 1, url: "https://real-active.example/", cookieStoreId: "firefox-container-5" }]);
+      };
       const p = env.sendMessage(
         { kind: "cookies.export", url: "https://attacker.example/", cookie_store_id: "firefox-container-evil" },
         popupSender(),
@@ -161,6 +167,8 @@ describe("background runtime.onMessage", () => {
       env.port.deliver({ op: "cookies.export.reply", request_id: req.request_id, ok: true });
       const r = await p;
       expect(r.ok).toBe(true);
+      // Exactly one tabs.query for the whole export (no TOCTOU pair).
+      expect(queryCalls).toBe(1);
     });
   });
 

@@ -95,23 +95,15 @@ function isPopupSender(sender) {
   return !!want && sender.url === want;
 }
 
-// Active-tab URL in the current window, derived in the background
-// rather than trusting a caller-supplied req.url.
-async function activeTabUrl() {
+// Active tab in the current window, derived in the background rather
+// than trusting caller-supplied req fields. A SINGLE tabs.query for
+// both the URL and the container store id: two separate queries had a
+// small TOCTOU window (the active tab could change between calls) and
+// were redundant (finding #10 follow-up).
+async function activeTab() {
   try {
     const tabs = await api.tabs.query({ active: true, currentWindow: true });
-    const t = tabs && tabs.length ? tabs[0] : null;
-    return t ? (t.url || "") : "";
-  } catch (_) { return ""; }
-}
-
-// Active-tab cookieStoreId so cookie export scopes to the container
-// the user is actually looking at, not a caller-supplied store id.
-async function activeTabStoreId() {
-  try {
-    const tabs = await api.tabs.query({ active: true, currentWindow: true });
-    const t = tabs && tabs.length ? tabs[0] : null;
-    return (t && t.cookieStoreId) || null;
+    return (tabs && tabs.length) ? tabs[0] : null;
   } catch (_) { return null; }
 }
 
@@ -160,11 +152,12 @@ if (api && api.runtime && api.runtime.onMessage) {
             if (!isPopupSender(sender)) {
               return { ok: false, error: "popup_required" };
             }
-            const url = await activeTabUrl();
+            const tab = await activeTab();
+            const url = tab ? (tab.url || "") : "";
             if (!url) {
               return { ok: false, error: "no_active_tab" };
             }
-            const storeId = await activeTabStoreId();
+            const storeId = (tab && tab.cookieStoreId) || null;
             const intent = await self.qdistroIntent.mint("cookies.export");
             const opts = storeId ? { cookieStoreId: storeId } : {};
             const r = await self.qdistroCookies.exportForUrl(url, intent, opts);

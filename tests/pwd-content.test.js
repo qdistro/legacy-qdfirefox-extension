@@ -107,6 +107,19 @@ function userClick(el) {
   return dispatchAs(el, new MouseEvent("click", { bubbles: true }), true);
 }
 
+// A genuine user keystroke into a field (trusted keydown). Used to
+// prove that ordinary typing produces NO fill request (finding #10
+// follow-up: keydown must not trigger a fill).
+function userType(el, key) {
+  return dispatchAs(el, new KeyboardEvent("keydown", { key, bubbles: true }), true);
+}
+
+// A genuine form submission (trusted submit event), as the browser
+// delivers it for a real button click / Enter keypress.
+function trustedSubmit(form) {
+  return dispatchAs(form, new Event("submit", { bubbles: true, cancelable: true }), true);
+}
+
 function buildLoginForm({ username = "", password = "" } = {}) {
   document.body.innerHTML = `
     <form id="login">
@@ -302,7 +315,7 @@ describe("pwd-content.js", () => {
       new MouseEvent("mousedown", { bubbles: true, cancelable: true }), true);
     expect(p.value).toBe("p1");
     const beforeLen = env.sent.length;
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    trustedSubmit(form);
     await tick();
     expect(env.sent.slice(beforeLen).find((m) => m.kind === "pwd.request_save"))
       .toBeUndefined();
@@ -314,7 +327,7 @@ describe("pwd-content.js", () => {
     // User types credentials by hand (no fill happened).
     p.value = "p1-typed";
     u.value = "alice-edited";
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    trustedSubmit(form);
     await tick();
     const saveFrame = env.sent.find((m) => m.kind === "pwd.request_save");
     expect(saveFrame).toBeTruthy();
@@ -326,7 +339,7 @@ describe("pwd-content.js", () => {
   it("form submit without any prior fill always reports request_save", async () => {
     const { form, p } = buildLoginForm({ username: "carol", password: "manual-pw" });
     load(env);
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    trustedSubmit(form);
     await tick();
     const saveFrame = env.sent.find((m) => m.kind === "pwd.request_save");
     expect(saveFrame).toBeTruthy();
@@ -338,9 +351,83 @@ describe("pwd-content.js", () => {
   it("form submit with an empty password input does NOT fire request_save", async () => {
     const { form } = buildLoginForm({ password: "" });
     load(env);
-    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    trustedSubmit(form);
     await tick();
     expect(env.sent.find((m) => m.kind === "pwd.request_save"))
       .toBeUndefined();
+  });
+
+  // --- Problem 1 regression: normal typing must NOT request a fill ---
+  it("typing a password (trusted keydown burst) produces ZERO pwd.request_fill", async () => {
+    env.setFillReply({
+      ok: true,
+      response: { credentials: [{ username: "alice", password: "s3cret" }] },
+    });
+    const { u, p } = buildLoginForm();
+    load(env);
+    // Focus then type a whole password. Under the old code each
+    // keydown fired a fresh pwd.request_fill and re-rendered the
+    // picker over the field being typed into.
+    p.focus();
+    for (const ch of "hunter2!") userType(p, ch);
+    // Reflect what real typing does to the field's value.
+    p.value = "hunter2!";
+    await tick();
+    expect(env.sent.find((m) => m.kind === "pwd.request_fill")).toBeUndefined();
+    expect(document.getElementById("qdistro-pwd-picker")).toBeNull();
+    expect(u.value).toBe("");
+  });
+
+  it("a trusted click on an ALREADY-NON-EMPTY password field does NOT re-request a fill", async () => {
+    env.setFillReply({
+      ok: true,
+      response: { credentials: [{ username: "alice", password: "s3cret" }] },
+    });
+    const { p } = buildLoginForm({ password: "typed-already" });
+    load(env);
+    userClick(p);
+    await tick();
+    // The field already holds text the user typed; never anchor a
+    // picker over it or request credentials.
+    expect(env.sent.find((m) => m.kind === "pwd.request_fill")).toBeUndefined();
+    expect(document.getElementById("qdistro-pwd-picker")).toBeNull();
+  });
+
+  it("a second trusted click while the picker is open does NOT re-request a fill", async () => {
+    env.setFillReply({
+      ok: true,
+      response: { credentials: [{ username: "alice", password: "s3cret" }] },
+    });
+    const { p } = buildLoginForm();
+    load(env);
+    userClick(p);
+    await tick();
+    expect(document.getElementById("qdistro-pwd-picker")).toBeTruthy();
+    const afterFirst = env.sent.filter((m) => m.kind === "pwd.request_fill").length;
+    expect(afterFirst).toBe(1);
+    // Click again while the picker is still open: no new request.
+    userClick(p);
+    await tick();
+    expect(env.sent.filter((m) => m.kind === "pwd.request_fill").length)
+      .toBe(afterFirst);
+  });
+
+  // --- Problem 2 regression: a synthetic submit must NOT offer save ---
+  it("a SYNTHETIC (untrusted) submit does NOT fire pwd.request_save (finding #10)", async () => {
+    // A malicious page sets attacker-chosen creds and dispatches a
+    // scripted submit. Honoring it would poison the credential store
+    // for the real origin.
+    const { form, u, p } = buildLoginForm();
+    load(env);
+    u.value = "attacker";
+    p.value = "evil-pw";
+    // Untrusted: plain dispatchEvent (isTrusted=false via the wrapper).
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await tick();
+    expect(env.sent.find((m) => m.kind === "pwd.request_save")).toBeUndefined();
+    // And a real (trusted) submit of the same form still works.
+    trustedSubmit(form);
+    await tick();
+    expect(env.sent.find((m) => m.kind === "pwd.request_save")).toBeTruthy();
   });
 });
