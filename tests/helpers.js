@@ -57,6 +57,7 @@ export function makeFakeBrowser(overrides = {}) {
       id: "test-ext-id",
       lastError: null,
       connectNative: () => { throw new Error("override connectNative"); },
+      getURL: (p) => `moz-extension://test-ext-id/${p}`,
       onStartup: { addListener: () => {} },
       onInstalled: { addListener: () => {} },
       onMessage: {

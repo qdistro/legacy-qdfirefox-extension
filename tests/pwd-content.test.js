@@ -1,8 +1,14 @@
 /** @vitest-environment jsdom */
-// pwd-content.js — autofill content script. On password-input focus
-// asks the background for credentials; fills one match directly,
-// renders a picker for multiple, swallows none. On form submit
-// reports pwd.request_save only if the password actually changed.
+// pwd-content.js — autofill content script. SECURITY CONTRACT
+// (finding #10): credential delivery requires a TRUSTED user gesture
+// (a real click/keydown, event.isTrusted === true). A synthetic /
+// programmatic focus or click from page script must NOT cause any
+// secret-bearing fill. On a trusted gesture the script asks the
+// background for credentials and renders a confirmation picker; it
+// never silently auto-fills, not even for a single match. A
+// credential only reaches the page DOM after the user clicks a
+// picker row (another trusted gesture). On form submit it reports
+// pwd.request_save only if the password actually changed.
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -35,28 +41,70 @@ function makeBrowser() {
 // in the same file. Track addEventListener calls during load so
 // afterEach can detach them — otherwise stale handlers from previous
 // tests fire against the new DOM with the wrong mock state.
-const tracked = []; // {target, type, listener, options}
+const tracked = []; // {target, type, wrapped, options}
+
+// jsdom marks Event.isTrusted as a non-configurable, read-only own
+// property (always false for dispatched events), so we cannot force
+// it on an event instance. Instead we wrap every listener the content
+// script registers and hand it a Proxy of the event whose isTrusted
+// reflects a per-dispatch flag — faithfully exercising the trust
+// check in pwd-content.js without touching production code.
+let forcedTrust = false;
+let origAddEventListener = null;
+
+function installTrustWrapper() {
+  origAddEventListener = EventTarget.prototype.addEventListener;
+  EventTarget.prototype.addEventListener = function (type, listener, options) {
+    const wrapped = function (e) {
+      const proxied = new Proxy(e, {
+        get(t, prop) {
+          if (prop === "isTrusted") return forcedTrust;
+          const v = t[prop];
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+      return listener.call(this, proxied);
+    };
+    tracked.push({ target: this, type, wrapped, options });
+    return origAddEventListener.call(this, type, wrapped, options);
+  };
+}
+
+function uninstallTrustWrapper() {
+  if (origAddEventListener) {
+    EventTarget.prototype.addEventListener = origAddEventListener;
+    origAddEventListener = null;
+  }
+}
 
 function load(env) {
   globalThis.browser = env.browser;
-  const origAdd = EventTarget.prototype.addEventListener;
-  EventTarget.prototype.addEventListener = function (type, listener, options) {
-    tracked.push({ target: this, type, listener, options });
-    return origAdd.call(this, type, listener, options);
-  };
-  try {
-    // eslint-disable-next-line no-new-func
-    new Function(SRC)();
-  } finally {
-    EventTarget.prototype.addEventListener = origAdd;
-  }
+  // eslint-disable-next-line no-new-func
+  new Function(SRC)();
 }
 
 function detachTrackedListeners() {
   while (tracked.length) {
-    const { target, type, listener, options } = tracked.pop();
-    try { target.removeEventListener(type, listener, options); } catch (_) {}
+    const { target, type, wrapped, options } = tracked.pop();
+    try { target.removeEventListener(type, wrapped, options); } catch (_) {}
   }
+}
+
+// Dispatch an event with the per-dispatch trust flag set; listeners
+// wrapped by installTrustWrapper observe event.isTrusted === `trusted`.
+function dispatchAs(target, event, trusted) {
+  const prev = forcedTrust;
+  forcedTrust = trusted;
+  try {
+    return target.dispatchEvent(event);
+  } finally {
+    forcedTrust = prev;
+  }
+}
+
+// A genuine user click on the password field.
+function userClick(el) {
+  return dispatchAs(el, new MouseEvent("click", { bubbles: true }), true);
 }
 
 function buildLoginForm({ username = "", password = "" } = {}) {
@@ -84,33 +132,51 @@ async function tick() {
 describe("pwd-content.js", () => {
   let env;
 
-  beforeEach(() => { env = makeBrowser(); });
+  beforeEach(() => { env = makeBrowser(); forcedTrust = false; installTrustWrapper(); });
   afterEach(() => {
+    uninstallTrustWrapper();
     detachTrackedListeners();
     delete globalThis.browser;
     document.body.innerHTML = "";
   });
 
-  it("password input focus fires pwd.request_fill with the page URL", async () => {
+  it("a TRUSTED user click on the password field fires pwd.request_fill with the page URL", async () => {
     const { p } = buildLoginForm();
     load(env);
-    p.dispatchEvent(new FocusEvent("focus"));
+    userClick(p);
     await tick();
     const frame = env.sent.find((m) => m.kind === "pwd.request_fill");
     expect(frame).toBeTruthy();
     expect(frame.url).toBe(location.href);
   });
 
-  it("focus on a non-password input does NOT fire request_fill", async () => {
-    const { u } = buildLoginForm();
+  it("a SYNTHETIC (untrusted) focus does NOT request credentials (finding #10)", async () => {
+    env.setFillReply({
+      ok: true,
+      response: { credentials: [{ username: "alice", password: "s3cret" }] },
+    });
+    const { u, p } = buildLoginForm();
     load(env);
-    u.dispatchEvent(new FocusEvent("focus"));
+    p.dispatchEvent(new FocusEvent("focus"));
+    p.dispatchEvent(new MouseEvent("click", { bubbles: true })); // isTrusted=false
+    await tick();
+    expect(env.sent.find((m) => m.kind === "pwd.request_fill")).toBeUndefined();
+    expect(p.value).toBe("");
+    expect(u.value).toBe("");
+    expect(document.getElementById("qdistro-pwd-picker")).toBeNull();
+  });
+
+  it("a trusted click on a non-password input does NOT fire request_fill", async () => {
+    buildLoginForm();
+    document.body.innerHTML = `<input id="lonely" type="text">`;
+    load(env);
+    userClick(document.getElementById("lonely"));
     await tick();
     expect(env.sent.find((m) => m.kind === "pwd.request_fill"))
       .toBeUndefined();
   });
 
-  it("single-credential reply auto-fills both username and password", async () => {
+  it("single-credential reply renders a confirmation picker and does NOT auto-fill (finding #10)", async () => {
     env.setFillReply({
       ok: true,
       response: {
@@ -119,13 +185,17 @@ describe("pwd-content.js", () => {
     });
     const { u, p } = buildLoginForm();
     load(env);
-    p.dispatchEvent(new FocusEvent("focus"));
+    userClick(p);
     await tick();
-    expect(p.value).toBe("s3cret");
-    expect(u.value).toBe("alice");
+    expect(p.value).toBe("");
+    expect(u.value).toBe("");
+    const picker = document.getElementById("qdistro-pwd-picker");
+    expect(picker).toBeTruthy();
+    expect(picker.children).toHaveLength(1);
+    expect(picker.children[0].textContent).toBe("alice");
   });
 
-  it("dispatches input/change events on the filled inputs", async () => {
+  it("a TRUSTED picker-row click fills, and dispatches input/change events", async () => {
     env.setFillReply({
       ok: true,
       response: { credentials: [{ username: "alice", password: "s3cret" }] },
@@ -138,15 +208,38 @@ describe("pwd-content.js", () => {
       }
     }
     load(env);
-    p.dispatchEvent(new FocusEvent("focus"));
+    userClick(p);
     await tick();
+    const picker = document.getElementById("qdistro-pwd-picker");
+    expect(picker).toBeTruthy();
+    dispatchAs(picker.children[0],
+      new MouseEvent("mousedown", { bubbles: true, cancelable: true }), true);
+    expect(p.value).toBe("s3cret");
+    expect(u.value).toBe("alice");
     expect(events).toContain("u:input");
     expect(events).toContain("u:change");
     expect(events).toContain("p:input");
     expect(events).toContain("p:change");
   });
 
-  it("multi-credential reply renders the picker overlay; click fills", async () => {
+  it("an UNTRUSTED picker-row mousedown does NOT fill (finding #10)", async () => {
+    env.setFillReply({
+      ok: true,
+      response: { credentials: [{ username: "alice", password: "s3cret" }] },
+    });
+    const { u, p } = buildLoginForm();
+    load(env);
+    userClick(p);
+    await tick();
+    const picker = document.getElementById("qdistro-pwd-picker");
+    expect(picker).toBeTruthy();
+    picker.children[0].dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, cancelable: true })); // untrusted
+    expect(p.value).toBe("");
+    expect(u.value).toBe("");
+  });
+
+  it("multi-credential reply renders the picker overlay; trusted click fills", async () => {
     env.setFillReply({
       ok: true,
       response: {
@@ -158,7 +251,7 @@ describe("pwd-content.js", () => {
     });
     const { u, p } = buildLoginForm();
     load(env);
-    p.dispatchEvent(new FocusEvent("focus"));
+    userClick(p);
     await tick();
     const picker = document.getElementById("qdistro-pwd-picker");
     expect(picker).toBeTruthy();
@@ -166,8 +259,9 @@ describe("pwd-content.js", () => {
     expect(picker.children[0].textContent).toBe("alice");
     expect(picker.children[1].textContent).toBe("bob");
 
-    // Click the second row.
-    picker.children[1].dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    // Trusted click on the second row.
+    dispatchAs(picker.children[1],
+      new MouseEvent("mousedown", { bubbles: true, cancelable: true }), true);
     expect(p.value).toBe("p2");
     expect(u.value).toBe("bob");
     // Picker is removed after a pick.
@@ -178,7 +272,7 @@ describe("pwd-content.js", () => {
     env.setFillReply({ ok: true, response: { credentials: [] } });
     const { p } = buildLoginForm({ password: "" });
     load(env);
-    p.dispatchEvent(new FocusEvent("focus"));
+    userClick(p);
     await tick();
     expect(p.value).toBe("");
     expect(document.getElementById("qdistro-pwd-picker")).toBeNull();
@@ -188,21 +282,25 @@ describe("pwd-content.js", () => {
     env.setFillReply({ ok: false, error: "policy_denied" });
     const { p } = buildLoginForm();
     load(env);
-    p.dispatchEvent(new FocusEvent("focus"));
+    userClick(p);
     await tick();
     expect(p.value).toBe("");
     expect(document.getElementById("qdistro-pwd-picker")).toBeNull();
   });
 
-  it("form submit after a fill does NOT fire pwd.request_save when value is unchanged", async () => {
+  it("form submit after a confirmed fill does NOT fire pwd.request_save when value is unchanged", async () => {
     env.setFillReply({
       ok: true,
       response: { credentials: [{ username: "alice", password: "p1" }] },
     });
     const { form, p } = buildLoginForm();
     load(env);
-    p.dispatchEvent(new FocusEvent("focus"));
+    userClick(p);
     await tick();
+    const picker = document.getElementById("qdistro-pwd-picker");
+    dispatchAs(picker.children[0],
+      new MouseEvent("mousedown", { bubbles: true, cancelable: true }), true);
+    expect(p.value).toBe("p1");
     const beforeLen = env.sent.length;
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await tick();
@@ -211,15 +309,9 @@ describe("pwd-content.js", () => {
   });
 
   it("form submit after a manual edit fires pwd.request_save", async () => {
-    env.setFillReply({
-      ok: true,
-      response: { credentials: [{ username: "alice", password: "p1" }] },
-    });
     const { form, u, p } = buildLoginForm();
     load(env);
-    p.dispatchEvent(new FocusEvent("focus"));
-    await tick();
-    // User retypes the password — different from what we filled.
+    // User types credentials by hand (no fill happened).
     p.value = "p1-typed";
     u.value = "alice-edited";
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));

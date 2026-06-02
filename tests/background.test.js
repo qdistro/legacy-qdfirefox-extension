@@ -31,17 +31,26 @@ describe("background runtime.onMessage", () => {
   });
 
   describe("pwd content-script entry points", () => {
-    it("pwd.request_fill mints an intent token and forwards as pwd.fill", async () => {
+    // A content-script sender always carries a tab; the browser sets
+    // sender.tab.url to the real frame origin.
+    function csSender(url) {
+      return { id: env.scope.browser.runtime.id, tab: { id: 7, url } };
+    }
+    function waitForSent(op) {
+      return vi.waitFor(() => {
+        const m = env.port.sent.find((x) => x.op === op);
+        if (!m) throw new Error(`${op} not yet sent`);
+        return m;
+      }, { timeout: 1000 });
+    }
+
+    it("pwd.request_fill derives the URL from sender.tab.url and forwards as pwd.fill", async () => {
       const p = env.sendMessage({
         kind: "pwd.request_fill",
         url: "https://example.com/login",
         username: "alice",
-      });
-      const req = await vi.waitFor(() => {
-        const m = env.port.sent.find((x) => x.op === "pwd.fill");
-        if (!m) throw new Error("pwd.fill not yet sent");
-        return m;
-      }, { timeout: 1000 });
+      }, csSender("https://example.com/login"));
+      const req = await waitForSent("pwd.fill");
       expect(req.url).toBe("https://example.com/login");
       expect(req.username).toBe("alice");
       expect(req.intent_token).toBeTruthy();
@@ -55,18 +64,33 @@ describe("background runtime.onMessage", () => {
       expect(r.response.credentials).toHaveLength(1);
     });
 
-    it("pwd.request_save mints a pwd.save token and forwards credentials", async () => {
+    it("pwd.request_fill REJECTS when req.url mismatches sender.tab.url (finding #10)", async () => {
+      const r = await env.sendMessage({
+        kind: "pwd.request_fill",
+        url: "https://evil.example/phish",
+        username: "alice",
+      }, csSender("https://bank.example/login"));
+      expect(r).toEqual({ ok: false, error: "url_mismatch" });
+      expect(env.port.sent.find((m) => m.op === "pwd.fill")).toBeUndefined();
+    });
+
+    it("pwd.request_fill REJECTS when there is no tab origin (finding #10)", async () => {
+      const r = await env.sendMessage({
+        kind: "pwd.request_fill",
+        url: "https://example.com/login",
+      });
+      expect(r).toEqual({ ok: false, error: "no_tab_url" });
+      expect(env.port.sent.find((m) => m.op === "pwd.fill")).toBeUndefined();
+    });
+
+    it("pwd.request_save derives the URL from sender.tab.url and forwards credentials", async () => {
       const p = env.sendMessage({
         kind: "pwd.request_save",
         url: "https://example.com/login",
         username: "alice",
         password: "s3cret!",
-      });
-      const req = await vi.waitFor(() => {
-        const m = env.port.sent.find((x) => x.op === "pwd.save");
-        if (!m) throw new Error("pwd.save not yet sent");
-        return m;
-      }, { timeout: 1000 });
+      }, csSender("https://example.com/login"));
+      const req = await waitForSent("pwd.save");
       expect(req).toMatchObject({
         url: "https://example.com/login",
         username: "alice",
@@ -76,6 +100,65 @@ describe("background runtime.onMessage", () => {
       env.port.deliver({
         op: "pwd.save.reply", request_id: req.request_id, ok: true, saved: true,
       });
+      const r = await p;
+      expect(r.ok).toBe(true);
+    });
+
+    it("pwd.request_save REJECTS a mismatched page-supplied URL", async () => {
+      const r = await env.sendMessage({
+        kind: "pwd.request_save",
+        url: "https://evil.example/",
+        username: "alice",
+        password: "s3cret!",
+      }, csSender("https://bank.example/login"));
+      expect(r).toEqual({ ok: false, error: "url_mismatch" });
+      expect(env.port.sent.find((m) => m.op === "pwd.save")).toBeUndefined();
+    });
+  });
+
+  describe("cookies.export consent gate (finding #11)", () => {
+    const popupUrl = "moz-extension://test-ext-id/src/popup.html";
+
+    function popupSender() {
+      return { id: env.scope.browser.runtime.id, url: popupUrl };
+    }
+    function waitForSent(op) {
+      return vi.waitFor(() => {
+        const m = env.port.sent.find((x) => x.op === op);
+        if (!m) throw new Error(`${op} not yet sent`);
+        return m;
+      }, { timeout: 1000 });
+    }
+
+    it("DENIES a content-script sender (sender.tab present)", async () => {
+      const r = await env.sendMessage(
+        { kind: "cookies.export", url: "https://example.com/" },
+        { id: env.scope.browser.runtime.id, tab: { id: 3, url: "https://example.com/" }, url: popupUrl },
+      );
+      expect(r).toEqual({ ok: false, error: "popup_required" });
+      expect(env.port.sent.find((m) => m.op === "cookies.export")).toBeUndefined();
+    });
+
+    it("DENIES a non-popup extension-page sender", async () => {
+      const r = await env.sendMessage(
+        { kind: "cookies.export", url: "https://example.com/" },
+        { id: env.scope.browser.runtime.id, url: "moz-extension://test-ext-id/src/options.html" },
+      );
+      expect(r).toEqual({ ok: false, error: "popup_required" });
+      expect(env.port.sent.find((m) => m.op === "cookies.export")).toBeUndefined();
+    });
+
+    it("ALLOWS the popup and derives URL + store id from the active tab (ignores req fields)", async () => {
+      env.scope.browser.tabs.query = (_q) =>
+        Promise.resolve([{ id: 1, url: "https://real-active.example/", cookieStoreId: "firefox-container-5" }]);
+      const p = env.sendMessage(
+        { kind: "cookies.export", url: "https://attacker.example/", cookie_store_id: "firefox-container-evil" },
+        popupSender(),
+      );
+      const req = await waitForSent("cookies.export");
+      expect(req.url).toBe("https://real-active.example/");
+      expect(req.cookie_store_id).toBe("firefox-container-5");
+      env.port.deliver({ op: "cookies.export.reply", request_id: req.request_id, ok: true });
       const r = await p;
       expect(r.ok).toBe(true);
     });

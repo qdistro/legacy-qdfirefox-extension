@@ -7,13 +7,22 @@
 //
 // Flow:
 //
-//   1. Listen for `focus` on <input type="password">.
+//   1. Listen for a *trusted user gesture* on <input type="password">
+//      (a real click or keydown, event.isTrusted === true). A bare
+//      programmatic/synthetic focus from page script is ignored — a
+//      phishing page must not be able to trigger credential delivery
+//      (finding #10).
 //   2. Send {kind: "pwd.request_fill", url, username?} to background.
-//   3. Background mints an intent token, calls qdistroPwd.fill,
-//      replies with {ok:true, credentials:[{username,password}, ...]}.
-//   4. If exactly one credential: fill the password input (and the
-//      preceding username input if we can find one). Else, render
-//      a minimal credential-picker overlay anchored to the input.
+//   3. Background derives the URL from sender.tab.url (rejecting any
+//      page-supplied mismatch), mints an intent token, calls
+//      qdistroPwd.fill, replies with
+//      {ok:true, credentials:[{username,password}, ...]}.
+//   4. We NEVER silently auto-fill. Even for a single match we render
+//      a confirmation picker; credentials only land in the page DOM
+//      after the user clicks a row (another trusted gesture). This
+//      keeps the standalone extensions in line with the qdbrowser
+//      model, where credential delivery requires explicit consent
+//      rather than a focus event.
 //   5. Listen for `submit` on the surrounding <form>. If the
 //      password differs from the last filled value (or we didn't
 //      fill anything), send {kind: "pwd.request_save", url,
@@ -105,6 +114,10 @@
       row.addEventListener("mouseenter", () => { row.style.background = "#eef"; });
       row.addEventListener("mouseleave", () => { row.style.background = "#fff"; });
       row.addEventListener("mousedown", (e) => {
+        // Only a genuine user click delivers the credential into the
+        // page DOM. A page-dispatched synthetic mousedown must not be
+        // able to harvest it (finding #10).
+        if (e.isTrusted !== true) return;
         e.preventDefault(); // don't blur the password input
         fillCredential(passwordInput, cred);
         removePicker();
@@ -123,11 +136,41 @@
     }, 0);
   }
 
-  async function onPasswordFocus(ev) {
+  // Track the last password input the user gestured on so we can
+  // anchor the picker even if a later async reply arrives.
+  let lastGestureAt = 0;
+
+  // Resolve the password input for a user-gesture event: either the
+  // event target is the password input, or it sits inside the same
+  // form as one (e.g. the user clicks a "show password"/icon button).
+  function passwordInputForGesture(ev) {
     const el = ev.target;
-    if (!(el instanceof HTMLInputElement)) return;
-    if (el.type !== "password") return;
-    log("password focus", location.href);
+    if (el instanceof HTMLInputElement && el.type === "password") return el;
+    if (el instanceof Element) {
+      const form = el.closest && el.closest("form");
+      if (form) {
+        const pw = Array.from(form.elements).find(
+          (e) => e instanceof HTMLInputElement && e.type === "password");
+        if (pw) return pw;
+      }
+    }
+    return null;
+  }
+
+  // Entry point: a TRUSTED user gesture on/near a password field.
+  // Untrusted (script-dispatched) events are ignored — a page must
+  // not be able to provoke credential delivery without a real user
+  // action. We request credentials but never auto-fill; the user
+  // must confirm by clicking a picker row.
+  async function onPasswordGesture(ev) {
+    if (!ev || ev.isTrusted !== true) return; // reject synthetic events
+    const el = passwordInputForGesture(ev);
+    if (!el) return;
+    // Throttle: one in-flight request per gesture burst.
+    const now = Date.now();
+    if (now - lastGestureAt < 250) return;
+    lastGestureAt = now;
+    log("password gesture", location.href);
     try {
       const usernameInput = findUsernameInput(el);
       const resp = await api.runtime.sendMessage({
@@ -138,11 +181,10 @@
       if (!resp || !resp.ok) return;
       const creds = (resp.response && resp.response.credentials) || [];
       if (creds.length === 0) return;
-      if (creds.length === 1) {
-        fillCredential(el, creds[0]);
-      } else {
-        renderPicker(el, creds);
-      }
+      // SECURITY: never silently auto-fill, even for a single match.
+      // A confirmation picker keeps credential delivery behind an
+      // explicit user click (finding #10).
+      renderPicker(el, creds);
     } catch (e) {
       log("fill failed", e && e.message);
     }
@@ -172,7 +214,12 @@
     });
   }
 
-  document.addEventListener("focus", onPasswordFocus, true);
+  // Trigger on real user gestures only (click / keydown). We do NOT
+  // listen for `focus`: focus can be moved programmatically by page
+  // script, which would let a phishing page provoke credential
+  // delivery without any user action (finding #10).
+  document.addEventListener("click", onPasswordGesture, true);
+  document.addEventListener("keydown", onPasswordGesture, true);
   document.addEventListener("submit", onSubmit, true);
   log("pwd content-script loaded");
 })();
