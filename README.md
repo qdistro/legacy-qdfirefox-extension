@@ -2,6 +2,18 @@
 
 Firefox MV3 WebExtension — native-messaging client for the qdistro browser bridge. Peer of [qdchrome-extension](../qdchrome-extension); same wire protocol, different host environment.
 
+## Role in qdistro
+
+This repo is the Firefox-native browser adapter for qdistro. It connects Firefox
+to the qdistro browser bridge so tabs, page extraction, password-vault requests,
+media status, downloads, notifications, cookies, and screen-lock inhibition can
+be mediated by qdistro policy.
+
+Firefox containers/contextual identities are the reason this remains a separate
+subrepo instead of a build target of qdchrome-extension. Containers map naturally
+onto qdistro's silo/session model and let browser state carry a stronger
+context boundary than a plain profile alone.
+
 ## Why a separate repo
 
 qdchrome-extension can build a Firefox MV2 xpi (concatenated bundle, `chrome.*` callback API). This repo is the Firefox-native counterpart:
@@ -28,9 +40,14 @@ v0.2.0 — 9 modules + 3 content-script observers. 71 vitest cases, all green.
 
 `tabs.open` accepts `cookie_store_id` to pin the new tab to a container; `cookies.export` accepts the same field to scope the export.
 
+Security-sensitive flows are still being aligned with the current qdistro
+browser model. Password fill/save, cookie export, and page extraction should be
+treated as privileged bridge operations requiring trusted UI and bridge policy
+before any user-facing install ships.
+
 ### Content scripts
 
-Injected at `document_idle` on `<all_urls>`. See `todo/03..05` for open items.
+Injected at `document_idle` on `<all_urls>`.
 
 - `pwd-content.js` — on `<input type=password>` focus: queries the bridge for credentials, auto-fills if exactly one match, renders a minimal picker otherwise. On `<form>` submit with a changed password: forwards to `pwd.save`.
 - `mpris-content.js` — 1Hz poll of `navigator.mediaSession.metadata` + `playbackState`, plus event-driven updates on `play`/`pause`/`ended`. Reports to the bridge as `mpris.update`. Receives `mpris.do_action` from the bridge and translates to `HTMLMediaElement.play()`/`.pause()` / `.currentTime`.
