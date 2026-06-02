@@ -78,6 +78,47 @@ if (api && api.tabs && api.tabs.onRemoved) {
   });
 }
 
+// Resolve the popup's extension-internal URL. The Firefox manifest
+// declares default_popup as "src/popup.html".
+function popupUrl() {
+  try { return api.runtime.getURL("src/popup.html"); } catch (_) { return null; }
+}
+
+// A trusted popup sender: our own extension id, an extension-page
+// origin (no sender.tab — content scripts always carry a tab), and
+// the sender.url is exactly our popup page. Gates consent-bearing
+// operations (cookie export) so a content-script bug can't mint them.
+function isPopupSender(sender) {
+  if (!sender || sender.id !== api.runtime.id) return false;
+  if (sender.tab) return false; // content scripts carry a tab
+  const want = popupUrl();
+  return !!want && sender.url === want;
+}
+
+// Active tab in the current window, derived in the background rather
+// than trusting caller-supplied req fields. A SINGLE tabs.query for
+// both the URL and the container store id: two separate queries had a
+// small TOCTOU window (the active tab could change between calls) and
+// were redundant (finding #10 follow-up).
+async function activeTab() {
+  try {
+    const tabs = await api.tabs.query({ active: true, currentWindow: true });
+    return (tabs && tabs.length) ? tabs[0] : null;
+  } catch (_) { return null; }
+}
+
+// For content-script-initiated pwd ops: the authoritative URL is
+// sender.tab.url (set by the browser), never req.url. Reject when
+// the content script's claimed URL disagrees with the real frame.
+function pwdSenderUrl(req, sender) {
+  const tabUrl = (sender && sender.tab && sender.tab.url) || "";
+  if (!tabUrl) return { ok: false, error: "no_tab_url" };
+  if (req && typeof req.url === "string" && req.url && req.url !== tabUrl) {
+    return { ok: false, error: "url_mismatch" };
+  }
+  return { ok: true, url: tabUrl };
+}
+
 // Popup ↔ background channel.
 if (api && api.runtime && api.runtime.onMessage) {
   api.runtime.onMessage.addListener((req, sender) => {
@@ -103,10 +144,23 @@ if (api && api.runtime && api.runtime.onMessage) {
             return { ok: true, response: r };
           }
           case "cookies.export": {
+            // Consent gate (finding #11): cookie export carries no
+            // per-op confirmation, so the ONLY trusted caller is our
+            // own popup. Reject content-script / non-popup senders and
+            // derive both the URL and the container store id from the
+            // active tab instead of trusting req.url / req.cookie_store_id.
+            if (!isPopupSender(sender)) {
+              return { ok: false, error: "popup_required" };
+            }
+            const tab = await activeTab();
+            const url = tab ? (tab.url || "") : "";
+            if (!url) {
+              return { ok: false, error: "no_active_tab" };
+            }
+            const storeId = (tab && tab.cookieStoreId) || null;
             const intent = await self.qdistroIntent.mint("cookies.export");
-            const opts = req.cookie_store_id
-              ? { cookieStoreId: req.cookie_store_id } : {};
-            const r = await self.qdistroCookies.exportForUrl(req.url, intent, opts);
+            const opts = storeId ? { cookieStoreId: storeId } : {};
+            const r = await self.qdistroCookies.exportForUrl(url, intent, opts);
             return { ok: true, response: r };
           }
           case "containers.list": {
@@ -122,18 +176,25 @@ if (api && api.runtime && api.runtime.onMessage) {
           // todo/06-intent-token-hmac.md).
 
           case "pwd.request_fill": {
+            // Finding #10: the page-supplied req.url is untrusted.
+            // Derive the URL from sender.tab.url and reject when the
+            // content script's claim disagrees with the real frame.
+            const su = pwdSenderUrl(req, sender);
+            if (!su.ok) return { ok: false, error: su.error };
             const intent = await self.qdistroIntent.mint("pwd.fill");
             const r = await self.qdistroPwd.fill(
-              req.url || (sender.url || ""),
+              su.url,
               req.username || null,
               intent,
             );
             return { ok: true, response: r };
           }
           case "pwd.request_save": {
+            const su = pwdSenderUrl(req, sender);
+            if (!su.ok) return { ok: false, error: su.error };
             const intent = await self.qdistroIntent.mint("pwd.save");
             const r = await self.qdistroPwd.save(
-              req.url || (sender.url || ""),
+              su.url,
               req.username || null,
               req.password || "",
               intent,
