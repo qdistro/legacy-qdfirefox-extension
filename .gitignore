@@ -1,6 +1,29 @@
+# Node.js
 node_modules/
+npm-debug.log
+yarn-error.log
+.npm
+package-lock.json.backup
+
+# Build & dist
 dist/
 coverage/
-*.log
-.DS_Store
+build/
 web-ext-artifacts/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor & IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cache/
+.zed
+
+# Logs
+*.log
