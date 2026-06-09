@@ -56,6 +56,49 @@ describe("qdistroPwd", () => {
     await p;
   });
 
+  // --- pwd.fill_confirm (phase 2) ----------------------------------
+
+  it("fillConfirm() sends pwd.fill_confirm with url/username/fill_token/intent", async () => {
+    const p = env.scope.qdistroPwd.fillConfirm(
+      "https://example.com/", "alice", "ft-abc", { nonce: "nc1" });
+    const req = replyTo("pwd.fill_confirm", {
+      credentials: [{ username: "alice", password: "s3cret" }],
+    });
+    expect(req).toMatchObject({
+      url: "https://example.com/",
+      username: "alice",
+      fill_token: "ft-abc",
+      intent_token: { nonce: "nc1" },
+    });
+    await p;
+  });
+
+  it("fillConfirm() resolves with the released password", async () => {
+    const p = env.scope.qdistroPwd.fillConfirm(
+      "https://example.com/", "alice", "ft-abc", { nonce: "nc2" });
+    replyTo("pwd.fill_confirm", {
+      credentials: [{ username: "alice", password: "s3cret", url: "https://example.com" }],
+    });
+    const r = await p;
+    expect(r.ok).toBe(true);
+    expect(r.credentials[0]).toMatchObject({ username: "alice", password: "s3cret" });
+  });
+
+  it("fillConfirm() surfaces an invalid/expired token as ok:false", async () => {
+    const p = env.scope.qdistroPwd.fillConfirm(
+      "https://example.com/", "alice", "stale", { nonce: "nc3" });
+    const req = env.port.sent.find((m) => m.op === "pwd.fill_confirm");
+    env.port.deliver({
+      op: "pwd.fill_confirm.reply",
+      request_id: req.request_id,
+      ok: false,
+      error: "invalid_token",
+    });
+    const r = await p;
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("invalid_token");
+  });
+
   it("fill() resolves with the bridge reply body", async () => {
     const p = env.scope.qdistroPwd.fill("https://example.com/", "alice", { nonce: "n4" });
     replyTo("pwd.fill", { credentials: [{ username: "alice", password: "x" }] });

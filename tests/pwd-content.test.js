@@ -18,17 +18,75 @@ const SRC = readFileSync(
   "utf8",
 );
 
+// The background now speaks the daemon's TWO-PHASE protocol:
+//   - pwd.request_fill        → metadata rows {username, url} + fill_token
+//   - pwd.request_fill_confirm → {credentials:[{username, password, url}]}
+// To keep the existing call-sites (which set a fill reply carrying
+// passwords) working, the mock SPLITS that reply: phase 1 returns the
+// rows with passwords stripped + a fill_token, and phase 2 looks the
+// password back up by username. A test can override either phase via
+// setFillReply / setConfirmReply.
+const FAKE_FILL_TOKEN = "ft-test-0123456789";
+
 function makeBrowser() {
   const sent = [];
   let fillReply = { ok: true, response: { credentials: [] } };
+  // username -> password, populated from the fill reply's rows so the
+  // confirm phase can hand back the secret the test declared.
+  let vault = {};
+  let confirmReplyOverride = null; // set to force a specific confirm reply
   return {
     sent,
-    setFillReply(r) { fillReply = r; },
+    setFillReply(r) {
+      // Stash passwords for the confirm phase; the phase-1 reply must
+      // NOT leak them (mirrors the daemon's metadata-only Fill).
+      vault = {};
+      const resp = r && r.response;
+      const creds = (resp && resp.credentials) || [];
+      const metaCreds = creds.map((c) => {
+        if (c && typeof c.password === "string") vault[c.username] = c.password;
+        return { username: c.username, url: c.url || "https://example.test/" };
+      });
+      if (r && r.ok && resp) {
+        fillReply = {
+          ok: true,
+          response: {
+            credentials: metaCreds,
+            // Only attach a token when there is something to confirm.
+            ...(metaCreds.length ? { fill_token: FAKE_FILL_TOKEN } : {}),
+          },
+        };
+      } else {
+        fillReply = r; // error replies pass through unchanged
+      }
+    },
+    // Force the next pwd.request_fill_confirm reply (e.g. to simulate a
+    // denied/expired token or a username mismatch).
+    setConfirmReply(r) { confirmReplyOverride = r; },
     browser: {
       runtime: {
         sendMessage(msg) {
           sent.push(msg);
-          if (msg.kind === "pwd.request_fill") return Promise.resolve(fillReply);
+          if (msg.kind === "pwd.request_fill") {
+            return Promise.resolve(fillReply);
+          }
+          if (msg.kind === "pwd.request_fill_confirm") {
+            if (confirmReplyOverride) return Promise.resolve(confirmReplyOverride);
+            const pw = vault[msg.username];
+            if (pw === undefined) {
+              return Promise.resolve({ ok: false, error: "invalid_token" });
+            }
+            return Promise.resolve({
+              ok: true,
+              response: {
+                credentials: [{
+                  username: msg.username,
+                  password: pw,
+                  url: msg.url,
+                }],
+              },
+            });
+          }
           // pwd.request_save is fire-and-forget; .catch handles failure.
           return Promise.resolve({ ok: true });
         },
@@ -227,6 +285,15 @@ describe("pwd-content.js", () => {
     expect(picker).toBeTruthy();
     dispatchAs(picker.children[0],
       new MouseEvent("mousedown", { bubbles: true, cancelable: true }), true);
+    // Phase 2 (fill_confirm) is async; the secret lands after a tick.
+    await tick();
+    // The row click sent a fill_confirm with the picked username +
+    // fill_token, and the password came back from phase 2 (NOT the
+    // phase-1 row, which carries no password).
+    const confirm = env.sent.find((m) => m.kind === "pwd.request_fill_confirm");
+    expect(confirm).toBeTruthy();
+    expect(confirm.username).toBe("alice");
+    expect(confirm.fill_token).toBe(FAKE_FILL_TOKEN);
     expect(p.value).toBe("s3cret");
     expect(u.value).toBe("alice");
     expect(events).toContain("u:input");
@@ -248,6 +315,10 @@ describe("pwd-content.js", () => {
     expect(picker).toBeTruthy();
     picker.children[0].dispatchEvent(
       new MouseEvent("mousedown", { bubbles: true, cancelable: true })); // untrusted
+    await tick();
+    // No phase-2 confirm was even requested, so no secret is released.
+    expect(env.sent.find((m) => m.kind === "pwd.request_fill_confirm"))
+      .toBeUndefined();
     expect(p.value).toBe("");
     expect(u.value).toBe("");
   });
@@ -275,6 +346,10 @@ describe("pwd-content.js", () => {
     // Trusted click on the second row.
     dispatchAs(picker.children[1],
       new MouseEvent("mousedown", { bubbles: true, cancelable: true }), true);
+    await tick();
+    // The confirm carries the picked username, and phase 2 returns p2.
+    const confirm = env.sent.find((m) => m.kind === "pwd.request_fill_confirm");
+    expect(confirm.username).toBe("bob");
     expect(p.value).toBe("p2");
     expect(u.value).toBe("bob");
     // Picker is removed after a pick.
@@ -313,6 +388,7 @@ describe("pwd-content.js", () => {
     const picker = document.getElementById("qdistro-pwd-picker");
     dispatchAs(picker.children[0],
       new MouseEvent("mousedown", { bubbles: true, cancelable: true }), true);
+    await tick();
     expect(p.value).toBe("p1");
     const beforeLen = env.sent.length;
     trustedSubmit(form);
@@ -429,5 +505,133 @@ describe("pwd-content.js", () => {
     trustedSubmit(form);
     await tick();
     expect(env.sent.find((m) => m.kind === "pwd.request_save")).toBeTruthy();
+  });
+
+  // --- Two-phase fill regression -----------------------------------
+  // The daemon's Fill returns metadata only; the password is released
+  // by a second-phase FillConfirm keyed on a single-use fill_token.
+  // The pre-fix content script read cred.password off the phase-1 row
+  // (always absent) and filled an empty string.
+
+  it("phase 1 (pwd.request_fill) NEVER receives a password; the fill comes from phase 2", async () => {
+    env.browser.runtime.sendMessage = (msg) => {
+      env.sent.push(msg);
+      if (msg.kind === "pwd.request_fill") {
+        return Promise.resolve({
+          ok: true,
+          response: {
+            credentials: [{ username: "alice", url: "https://example.test/" }],
+            fill_token: FAKE_FILL_TOKEN,
+          },
+        });
+      }
+      if (msg.kind === "pwd.request_fill_confirm") {
+        expect(msg.username).toBe("alice");
+        expect(msg.fill_token).toBe(FAKE_FILL_TOKEN);
+        return Promise.resolve({
+          ok: true,
+          response: {
+            credentials: [{
+              username: "alice", password: "real-secret",
+              url: "https://example.test/",
+            }],
+          },
+        });
+      }
+      return Promise.resolve({ ok: true });
+    };
+    const { u, p } = buildLoginForm();
+    load(env);
+    userClick(p);
+    await tick();
+    const picker = document.getElementById("qdistro-pwd-picker");
+    expect(picker).toBeTruthy();
+    expect(p.value).toBe("");
+    dispatchAs(picker.children[0],
+      new MouseEvent("mousedown", { bubbles: true, cancelable: true }), true);
+    await tick();
+    expect(u.value).toBe("alice");
+    expect(p.value).toBe("real-secret");
+  });
+
+  it("a fill reply WITHOUT a fill_token renders no picker (phase 2 impossible)", async () => {
+    env.browser.runtime.sendMessage = (msg) => {
+      env.sent.push(msg);
+      if (msg.kind === "pwd.request_fill") {
+        return Promise.resolve({
+          ok: true,
+          response: { credentials: [{ username: "alice", url: "u" }] }, // no fill_token
+        });
+      }
+      return Promise.resolve({ ok: true });
+    };
+    const { p } = buildLoginForm();
+    load(env);
+    userClick(p);
+    await tick();
+    expect(document.getElementById("qdistro-pwd-picker")).toBeNull();
+    expect(p.value).toBe("");
+  });
+
+  it("a denied/expired fill_confirm does NOT fill the field", async () => {
+    env.setFillReply({
+      ok: true,
+      response: { credentials: [{ username: "alice", password: "s3cret" }] },
+    });
+    // The background wraps the daemon reply, so the realistic shape is
+    // an outer ok:true carrying an inner ok:false / error.
+    env.setConfirmReply({ ok: true, response: { ok: false, error: "invalid_token" } });
+    const { u, p } = buildLoginForm();
+    load(env);
+    userClick(p);
+    await tick();
+    const picker = document.getElementById("qdistro-pwd-picker");
+    dispatchAs(picker.children[0],
+      new MouseEvent("mousedown", { bubbles: true, cancelable: true }), true);
+    await tick();
+    expect(env.sent.find((m) => m.kind === "pwd.request_fill_confirm")).toBeTruthy();
+    expect(p.value).toBe("");
+    expect(u.value).toBe("");
+  });
+
+  it("an outer ok:false fill_confirm (background-level reject) does NOT fill", async () => {
+    env.setFillReply({
+      ok: true,
+      response: { credentials: [{ username: "alice", password: "s3cret" }] },
+    });
+    // e.g. the background rejected the confirm (url_mismatch / invalid_request):
+    // the reply has no `response` wrapper at all.
+    env.setConfirmReply({ ok: false, error: "url_mismatch" });
+    const { u, p } = buildLoginForm();
+    load(env);
+    userClick(p);
+    await tick();
+    const picker = document.getElementById("qdistro-pwd-picker");
+    dispatchAs(picker.children[0],
+      new MouseEvent("mousedown", { bubbles: true, cancelable: true }), true);
+    await tick();
+    expect(p.value).toBe("");
+    expect(u.value).toBe("");
+  });
+
+  it("a fill_confirm whose username disagrees with the pick is REJECTED (no fill)", async () => {
+    env.setFillReply({
+      ok: true,
+      response: { credentials: [{ username: "alice", password: "s3cret" }] },
+    });
+    env.setConfirmReply({
+      ok: true,
+      response: { credentials: [{ username: "mallory", password: "evil", url: "u" }] },
+    });
+    const { u, p } = buildLoginForm();
+    load(env);
+    userClick(p);
+    await tick();
+    const picker = document.getElementById("qdistro-pwd-picker");
+    dispatchAs(picker.children[0],
+      new MouseEvent("mousedown", { bubbles: true, cancelable: true }), true);
+    await tick();
+    expect(p.value).toBe("");
+    expect(u.value).toBe("");
   });
 });

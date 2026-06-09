@@ -21,14 +21,23 @@
 //   2. Send {kind: "pwd.request_fill", url, username?} to background.
 //   3. Background derives the URL from sender.tab.url (rejecting any
 //      page-supplied mismatch), mints an intent token, calls
-//      qdistroPwd.fill, replies with
-//      {ok:true, credentials:[{username,password}, ...]}.
+//      qdistroPwd.fill, replies with credential METADATA ONLY:
+//      {ok:true, credentials:[{username, url}, ...], fill_token}.
+//      The rows carry NO password — the daemon's two-phase design
+//      withholds the secret until phase 2 (see doc/password-manager.md).
 //   4. We NEVER silently auto-fill. Even for a single match we render
 //      a confirmation picker; credentials only land in the page DOM
 //      after the user clicks a row (another trusted gesture). This
 //      keeps the standalone extensions in line with the qdbrowser
 //      model, where credential delivery requires explicit consent
 //      rather than a focus event.
+//   4b. PHASE 2: on that trusted row click we send
+//      {kind: "pwd.request_fill_confirm", url, username, fill_token}
+//      to the background, which redeems the single-use fill_token via
+//      pwd.fill_confirm and returns {credentials:[{username, password,
+//      url}]}. Only then does the password reach the page DOM. (The
+//      pre-two-phase code read cred.password straight off the phase-1
+//      row, which is always absent — it filled an empty string.)
 //   5. Listen for `submit` on the surrounding <form>. If the
 //      password differs from the last filled value (or we didn't
 //      fill anything), send {kind: "pwd.request_save", url,
@@ -72,18 +81,56 @@
     return null;
   }
 
-  function fillCredential(passwordInput, cred) {
+  // Write the confirmed credential into the page DOM. `username` and
+  // `password` come from the phase-2 pwd.request_fill_confirm reply —
+  // the phase-1 picker row carries no secret.
+  function fillCredential(passwordInput, username, password) {
     const usernameInput = findUsernameInput(passwordInput);
-    if (usernameInput && cred.username) {
-      usernameInput.value = cred.username;
+    if (usernameInput && username) {
+      usernameInput.value = username;
       usernameInput.dispatchEvent(new Event("input", { bubbles: true }));
       usernameInput.dispatchEvent(new Event("change", { bubbles: true }));
     }
-    passwordInput.value = cred.password || "";
+    passwordInput.value = password || "";
     passwordInput.dispatchEvent(new Event("input", { bubbles: true }));
     passwordInput.dispatchEvent(new Event("change", { bubbles: true }));
     lastFilledValue = passwordInput.value;
     lastFilledFor = passwordInput;
+  }
+
+  // PHASE 2: redeem the single-use fill_token for the actual password,
+  // then write it into the page DOM. Runs on a trusted picker-row
+  // click. The background derives the URL from sender.tab.url; we pass
+  // location.href only for the mismatch check there.
+  async function confirmAndFill(passwordInput, username, fillToken) {
+    try {
+      const resp = await api.runtime.sendMessage({
+        kind: "pwd.request_fill_confirm",
+        url: location.href,
+        username,
+        fill_token: fillToken,
+      });
+      if (!resp || !resp.ok) {
+        log("fill_confirm rejected", resp && resp.error);
+        return;
+      }
+      const creds = (resp.response && resp.response.credentials) || [];
+      const confirmed = creds[0];
+      if (!confirmed) {
+        log("fill_confirm returned no credential");
+        return;
+      }
+      // The daemon echoes the username it released the secret for;
+      // refuse a mismatch rather than filling the wrong account.
+      const confirmedUser = confirmed.username || "";
+      if (confirmedUser !== username) {
+        log("fill_confirm username mismatch", confirmedUser, username);
+        return;
+      }
+      fillCredential(passwordInput, confirmedUser, confirmed.password || "");
+    } catch (e) {
+      log("fill_confirm failed", e && e.message);
+    }
   }
 
   // The password input the picker is currently anchored to (or null).
@@ -97,7 +144,7 @@
     pickerOpenFor = null;
   }
 
-  function renderPicker(passwordInput, credentials) {
+  function renderPicker(passwordInput, credentials, fillToken) {
     removePicker();
     pickerOpenFor = passwordInput;
     const rect = passwordInput.getBoundingClientRect();
@@ -132,8 +179,10 @@
         // able to harvest it (finding #10).
         if (e.isTrusted !== true) return;
         e.preventDefault(); // don't blur the password input
-        fillCredential(passwordInput, cred);
+        // PHASE 2: this trusted pick redeems the fill_token for the
+        // actual password (async); the row carries username only.
         removePicker();
+        confirmAndFill(passwordInput, cred.username || "", fillToken);
       });
       box.appendChild(row);
     }
@@ -205,10 +254,18 @@
       if (!resp || !resp.ok) return;
       const creds = (resp.response && resp.response.credentials) || [];
       if (creds.length === 0) return;
+      // The fill_token gates phase 2 (pwd.request_fill_confirm). With
+      // no token the picker would be useless — the daemon could never
+      // release a password — so bail rather than render dead rows.
+      const fillToken = resp.response && resp.response.fill_token;
+      if (!fillToken || typeof fillToken !== "string") {
+        log("fill reply missing fill_token");
+        return;
+      }
       // SECURITY: never silently auto-fill, even for a single match.
       // A confirmation picker keeps credential delivery behind an
       // explicit user click (finding #10).
-      renderPicker(el, creds);
+      renderPicker(el, creds, fillToken);
     } catch (e) {
       log("fill failed", e && e.message);
     }

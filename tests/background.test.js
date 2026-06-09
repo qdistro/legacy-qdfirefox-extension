@@ -83,6 +83,54 @@ describe("background runtime.onMessage", () => {
       expect(env.port.sent.find((m) => m.op === "pwd.fill")).toBeUndefined();
     });
 
+    it("pwd.request_fill_confirm forwards url/username/fill_token as pwd.fill_confirm", async () => {
+      const p = env.sendMessage({
+        kind: "pwd.request_fill_confirm",
+        url: "https://example.com/login",
+        username: "alice",
+        fill_token: "ft-xyz",
+      }, csSender("https://example.com/login"));
+      const req = await waitForSent("pwd.fill_confirm");
+      expect(req.url).toBe("https://example.com/login");
+      expect(req.username).toBe("alice");
+      expect(req.fill_token).toBe("ft-xyz");
+      expect(req.intent_token.op).toBe("pwd.fill_confirm");
+      env.port.deliver({
+        op: "pwd.fill_confirm.reply", request_id: req.request_id, ok: true,
+        credentials: [{ username: "alice", password: "secret", url: "https://example.com" }],
+      });
+      const r = await p;
+      expect(r.ok).toBe(true);
+      expect(r.response.credentials[0].password).toBe("secret");
+    });
+
+    it("pwd.request_fill_confirm REJECTS a mismatched page-supplied URL (finding #10)", async () => {
+      const r = await env.sendMessage({
+        kind: "pwd.request_fill_confirm",
+        url: "https://evil.example/phish",
+        username: "alice",
+        fill_token: "ft-xyz",
+      }, csSender("https://bank.example/login"));
+      expect(r).toEqual({ ok: false, error: "url_mismatch" });
+      expect(env.port.sent.find((m) => m.op === "pwd.fill_confirm")).toBeUndefined();
+    });
+
+    it("pwd.request_fill_confirm REJECTS a missing username or fill_token", async () => {
+      const noUser = await env.sendMessage({
+        kind: "pwd.request_fill_confirm",
+        url: "https://example.com/login",
+        fill_token: "ft-xyz",
+      }, csSender("https://example.com/login"));
+      expect(noUser).toEqual({ ok: false, error: "invalid_request" });
+      const noToken = await env.sendMessage({
+        kind: "pwd.request_fill_confirm",
+        url: "https://example.com/login",
+        username: "alice",
+      }, csSender("https://example.com/login"));
+      expect(noToken).toEqual({ ok: false, error: "invalid_request" });
+      expect(env.port.sent.find((m) => m.op === "pwd.fill_confirm")).toBeUndefined();
+    });
+
     it("pwd.request_save derives the URL from sender.tab.url and forwards credentials", async () => {
       const p = env.sendMessage({
         kind: "pwd.request_save",
