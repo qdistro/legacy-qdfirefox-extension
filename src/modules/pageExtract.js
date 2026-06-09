@@ -26,6 +26,24 @@
     return results && results[0] && results[0].result;
   }
 
+  // Resolve a tab's authoritative URL for the origin allowlist. Works
+  // with both the Promise (Firefox) and callback shapes of tabs.get.
+  // Returns "" when the tab can't be resolved.
+  function tabUrl(tabId) {
+    return new Promise((resolve) => {
+      try {
+        if (!api.tabs || !api.tabs.get) { resolve(""); return; }
+        const got = api.tabs.get(tabId, (t) => {
+          if (api.runtime && api.runtime.lastError) { resolve(""); return; }
+          resolve((t && t.url) || "");
+        });
+        if (got && typeof got.then === "function") {
+          got.then((t) => resolve((t && t.url) || ""), () => resolve(""));
+        }
+      } catch (_) { resolve(""); }
+    });
+  }
+
   function captureSelectionFn() {
     const sel = (window.getSelection && window.getSelection().toString()) || "";
     return {
@@ -121,6 +139,18 @@
     api.contextMenus.onClicked.addListener(async (info, tab) => {
       if (info.menuItemId !== "qdistro-share-to") return;
       if (!tab || tab.id == null) return;
+      // Origin allowlist (options page): only extract from listed
+      // origins. tab.url is the authoritative frame URL from the
+      // browser. Await the gate's first storage read so a cold-start
+      // context-menu click can't slip past the allowlist while it's
+      // still loading (codex #1 follow-up). Module on/off is gated
+      // downstream in the dispatcher.
+      if (root.qdistroGate) {
+        if (root.qdistroGate.ready && !root.qdistroGate.isLoaded()) {
+          await root.qdistroGate.ready();
+        }
+        if (!root.qdistroGate.isOriginAllowed(tab.url || "")) return;
+      }
       try {
         const intentToken = root.qdistroIntent
           ? await root.qdistroIntent.mint("page.extract", 5000)
@@ -144,6 +174,20 @@
     const mode = String(msg.mode || "visible_text");
     if (typeof tabId !== "number") {
       return { ok: false, error: "missing_tab_id" };
+    }
+    // Origin allowlist (options page): resolve the target tab's real
+    // URL and refuse extraction from an off-list page, even though the
+    // request comes from the trusted bridge (codex finding #4). Await
+    // the gate's first read so a cold-start request can't slip past the
+    // allowlist while it loads. Module on/off is gated in the dispatcher.
+    if (root.qdistroGate) {
+      if (root.qdistroGate.ready && !root.qdistroGate.isLoaded()) {
+        await root.qdistroGate.ready();
+      }
+      const url = await tabUrl(tabId);
+      if (!root.qdistroGate.isOriginAllowed(url)) {
+        return { ok: false, error: "origin_not_allowed" };
+      }
     }
     try {
       const captured = await executeInTab(

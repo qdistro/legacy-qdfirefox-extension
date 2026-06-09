@@ -33,6 +33,29 @@
     try { console.log("[qdistro/dispatch]", ...args); } catch (_) { /* event page */ }
   }
 
+  // Module gate (options-page toggles). Looked up lazily because
+  // gate.js loads AFTER dispatcher.js in the background.scripts order;
+  // with no gate present at all (it never loaded) an op passes — that
+  // fail-open is only for a genuinely-absent enforcement layer, never
+  // for a disabled flag. Infrastructure ops (qdistro.*) pass.
+  function opAllowed(op) {
+    const gate = root.qdistroGate;
+    if (!gate) return true;
+    return gate.opEnabled(op);
+  }
+
+  // Await the gate's first storage read so a disabled-module flag is
+  // honoured even on the worker's cold-start event (codex finding #1).
+  // Returns null when there's nothing to wait for (infrastructure op,
+  // no gate, or the gate has already loaded) — callers skip the await
+  // so the steady-state path stays synchronous.
+  function gateReadyIfPending(op) {
+    const gate = root.qdistroGate;
+    if (!gate || !gate.opModule(op) || !gate.ready) return null;
+    if (gate.isLoaded && gate.isLoaded()) return null;
+    return gate.ready();
+  }
+
   function register(op, handler) {
     if (handlers.has(op)) {
       log(`overwriting handler for ${op}`);
@@ -61,6 +84,25 @@
       return;
     }
 
+    // Gate disabled modules BEFORE the handler runs — a disabled
+    // feature must not act on a bridge request. On cold start (gate
+    // config not yet read) await the first read so the event can't slip
+    // past a saved disable; in steady state the check is synchronous.
+    // Reply with a deterministic error rather than dropping it.
+    const pendingReady = gateReadyIfPending(op);
+    if (pendingReady) await pendingReady;
+    if (!opAllowed(op)) {
+      log("inbound op gated (module disabled)", op);
+      if (msg.request_id != null) {
+        port.send({
+          op: `${op}.reply`,
+          request_id: msg.request_id,
+          ok: false,
+          error: "module_disabled",
+        });
+      }
+      return;
+    }
     const h = handlers.get(op);
     if (!h) {
       log("no handler for inbound op", op);
@@ -98,8 +140,7 @@
     }
   }
 
-  function request(op, body, opts) {
-    opts = opts || {};
+  function _send(op, body, opts) {
     const request_id = nextRequestId++;
     const timeoutMs = opts.timeoutMs || DEFAULT_TIMEOUT_MS;
     return new Promise((resolve, reject) => {
@@ -117,6 +158,28 @@
         reject(new Error("port_disconnected"));
       }
     });
+  }
+
+  function request(op, body, opts) {
+    opts = opts || {};
+    // Gate extension-initiated ops too: a disabled module must not push
+    // to the bridge. Fast path: once the gate's first read has landed
+    // (steady state), enforce synchronously so the wire send happens on
+    // the same tick. Slow path: only for a module-mapped op whose gate
+    // config hasn't loaded yet (cold start) do we await ready() so a
+    // saved disable wins (codex finding #1). Infrastructure ops never
+    // wait — no module.
+    const gate = root.qdistroGate;
+    if (gate && gate.opModule(op) && gate.ready && !gate.isLoaded()) {
+      return gate.ready().then(() => {
+        if (!opAllowed(op)) throw new Error("module_disabled");
+        return _send(op, body, opts);
+      });
+    }
+    if (!opAllowed(op)) {
+      return Promise.reject(new Error("module_disabled"));
+    }
+    return _send(op, body, opts);
   }
 
   function _resetForTests() {

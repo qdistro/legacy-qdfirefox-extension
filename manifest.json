@@ -41,6 +41,7 @@
       "src/port.js",
       "src/dispatcher.js",
       "src/intent.js",
+      "src/gate.js",
       "src/modules/tabs.js",
       "src/modules/pwd.js",
       "src/modules/pageExtract.js",

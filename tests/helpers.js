@@ -69,6 +69,7 @@ export function makeFakeBrowser(overrides = {}) {
       query: (_q) => Promise.resolve([]),
       create: (p) => Promise.resolve({ id: 99, ...p }),
       remove: (_ids) => Promise.resolve(),
+      get: (id) => Promise.resolve({ id, url: "https://example.com/" }),
       onRemoved: {
         addListener: (cb) => onTabRemovedListeners.push(cb),
         _listeners: onTabRemovedListeners,
@@ -107,6 +108,7 @@ export function makeFakeBrowser(overrides = {}) {
         get: (_k) => Promise.resolve({}),
         set: (_v) => Promise.resolve(),
       },
+      onChanged: makeEvent(),
     },
     scripting: {
       executeScript: () => Promise.resolve([{ result: {} }]),
@@ -164,6 +166,7 @@ export function loadExtension(opts = {}) {
   evalFile("port.js");
   evalFile("dispatcher.js");
   evalFile("intent.js");
+  evalFile("gate.js");
   // Seed a default session secret so tests that call mint() don't
   // need to drive a full qdistro.handshake first. Tests can call
   // setSessionSecretHex(null) to exercise the pre-handshake path.

@@ -1,6 +1,9 @@
 // Options page. Persists per-module enabled flags + origin-allowlist
-// into browser.storage.local. Background reads these at boot and
-// re-reads on storage.onChanged to gate module registration.
+// into browser.storage.local. The background gate (src/gate.js) reads
+// these at boot and re-reads on storage.onChanged to gate dispatcher
+// ops + background message handling: a disabled module's wire ops are
+// refused, and (when the allowlist is non-empty) content-script ops
+// are restricted to the listed origins.
 //
 // Storage shape:
 //   {
