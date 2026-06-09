@@ -25,7 +25,7 @@ Per qdistro spec/14 Phase-9d:
 
 ## Bridge counterpart
 
-Tracked in `qdistro/todo/browser/01-bridge-phase9.md`. The bridge must:
+Tracked in `../../qdistro/doc/browser.md`. The bridge must:
 
 - Accept the handshake op and derive the same shared key.
 - Reject every other op until the handshake completes.
