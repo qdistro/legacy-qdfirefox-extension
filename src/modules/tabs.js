@@ -48,6 +48,16 @@
     return true;
   }
 
+  // Deliver a one-shot message to a content script in `tabId` and
+  // resolve with its reply. Used by the mpris module to forward an
+  // inbound `mpris.control` op down to the originating tab's
+  // mpris-content.js as `mpris.do_action`. Firefox's Promise-based
+  // tabs.sendMessage rejects when no content script is listening, so
+  // the caller sees a thrown error rather than a silent hang.
+  async function sendMessageToTab(tabId, message) {
+    return await api.tabs.sendMessage(tabId, message);
+  }
+
   dispatcher.register("tabs.list", async (_msg) => {
     const tabs = await queryTabs({});
     return { tabs: tabs.map(serialize) };
@@ -70,5 +80,7 @@
     return { closed: ids };
   });
 
-  root.qdistroTabs = { serialize, queryTabs, createTab, removeTabs };
+  root.qdistroTabs = {
+    serialize, queryTabs, createTab, removeTabs, sendMessageToTab,
+  };
 })(typeof self !== "undefined" ? self : globalThis);

@@ -180,6 +180,52 @@ describe("mpris-content.js", () => {
       expect(reply.ok).toBe(true);
     });
 
+    it("'playpause' toggles play when paused", async () => {
+      const audio = document.createElement("audio");
+      Object.defineProperty(audio, "paused", { value: true, configurable: true });
+      const calls = [];
+      audio.play = () => { calls.push("play"); };
+      audio.pause = () => { calls.push("pause"); };
+      document.body.appendChild(audio);
+      load(env);
+      await Promise.resolve();
+      const [reply] = await env.fireInbound({ kind: "mpris.do_action", action: "playpause" });
+      expect(calls).toEqual(["play"]);
+      expect(reply).toEqual({ ok: true, action: "playpause" });
+    });
+
+    it("'playpause' toggles pause when playing", async () => {
+      const audio = document.createElement("audio");
+      Object.defineProperty(audio, "paused", { value: false, configurable: true });
+      const calls = [];
+      audio.play = () => { calls.push("play"); };
+      audio.pause = () => { calls.push("pause"); };
+      document.body.appendChild(audio);
+      load(env);
+      await Promise.resolve();
+      const [reply] = await env.fireInbound({ kind: "mpris.do_action", action: "playpause" });
+      expect(calls).toEqual(["pause"]);
+      expect(reply.ok).toBe(true);
+    });
+
+    it("'stop' pauses and rewinds to 0", async () => {
+      const audio = document.createElement("audio");
+      let ct = 5;
+      Object.defineProperty(audio, "currentTime", {
+        get() { return ct; }, set(v) { ct = v; },
+      });
+      const calls = [];
+      audio.play = () => { calls.push("play"); };
+      audio.pause = () => { calls.push("pause"); };
+      document.body.appendChild(audio);
+      load(env);
+      await Promise.resolve();
+      const [reply] = await env.fireInbound({ kind: "mpris.do_action", action: "stop" });
+      expect(calls).toEqual(["pause"]);
+      expect(ct).toBe(0);
+      expect(reply).toEqual({ ok: true, action: "stop" });
+    });
+
     it("'seek' sets media.currentTime to value", async () => {
       const audio = document.createElement("audio");
       let ct = 0;

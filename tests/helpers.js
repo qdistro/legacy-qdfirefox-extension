@@ -70,6 +70,8 @@ export function makeFakeBrowser(overrides = {}) {
       create: (p) => Promise.resolve({ id: 99, ...p }),
       remove: (_ids) => Promise.resolve(),
       get: (id) => Promise.resolve({ id, url: "https://example.com/" }),
+      sendMessage: (_tabId, message) =>
+        Promise.resolve({ ok: true, action: message && message.action }),
       onRemoved: {
         addListener: (cb) => onTabRemovedListeners.push(cb),
         _listeners: onTabRemovedListeners,

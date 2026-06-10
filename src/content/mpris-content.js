@@ -121,6 +121,16 @@
         case "pause":
           media.pause();
           break;
+        case "playpause":
+          // The MPRIS PlayPause verb — toggle on the element's own
+          // state so a single admin-widget button works.
+          if (media.paused) media.play(); else media.pause();
+          break;
+        case "stop":
+          // MPRIS Stop: pause and rewind to the start.
+          media.pause();
+          try { media.currentTime = 0; } catch (_) { /* live stream */ }
+          break;
         case "seek":
           if (typeof req.value === "number") media.currentTime = req.value;
           break;

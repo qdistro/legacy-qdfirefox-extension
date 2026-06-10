@@ -72,4 +72,25 @@ describe("qdistroTabs", () => {
     expect(reply.ok).toBe(true);
     expect(reply.closed).toEqual([42]);
   });
+
+  it("sendMessageToTab delivers to the tab and resolves the reply", async () => {
+    const calls = [];
+    env.scope.qdistroApi.tabs.sendMessage = (tabId, message) => {
+      calls.push({ tabId, message });
+      return Promise.resolve({ ok: true, action: message.action });
+    };
+    const r = await env.scope.qdistroTabs.sendMessageToTab(7, {
+      kind: "mpris.do_action", action: "play",
+    });
+    expect(calls).toEqual([{ tabId: 7, message: { kind: "mpris.do_action", action: "play" } }]);
+    expect(r).toEqual({ ok: true, action: "play" });
+  });
+
+  it("sendMessageToTab rejects when no content script is listening", async () => {
+    env.scope.qdistroApi.tabs.sendMessage = () =>
+      Promise.reject(new Error("Could not establish connection."));
+    await expect(
+      env.scope.qdistroTabs.sendMessageToTab(7, { kind: "mpris.do_action", action: "play" }),
+    ).rejects.toThrow(/Could not establish/);
+  });
 });
