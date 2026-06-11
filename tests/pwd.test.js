@@ -136,4 +136,81 @@ describe("qdistroPwd", () => {
     expect(r.ok).toBe(false);
     expect(r.error).toBe("vault_locked");
   });
+
+  // --- ported parity cases (qdchrome pwd suite) -----------------------
+
+  it("exposes fill / fillConfirm / save on the module", () => {
+    expect(env.scope.qdistroPwd).toBeTruthy();
+    expect(typeof env.scope.qdistroPwd.fill).toBe("function");
+    expect(typeof env.scope.qdistroPwd.fillConfirm).toBe("function");
+    expect(typeof env.scope.qdistroPwd.save).toBe("function");
+  });
+
+  it("fill() surfaces a credential-not-found reply as ok:false", async () => {
+    const p = env.scope.qdistroPwd.fill("https://example.com/", "ghost", { nonce: "n7" });
+    const req = env.port.sent.find((m) => m.op === "pwd.fill");
+    env.port.deliver({
+      op: "pwd.fill.reply",
+      request_id: req.request_id,
+      ok: false,
+      error: "credential_not_found",
+    });
+    const r = await p;
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("credential_not_found");
+  });
+
+  it("save() resolves with ok:true and stored_at when the bridge confirms storage", async () => {
+    const p = env.scope.qdistroPwd.save(
+      "https://example.com/", "bob", "hunter2", { nonce: "n8" });
+    const req = env.port.sent.find((m) => m.op === "pwd.save");
+    env.port.deliver({
+      op: "pwd.save.reply",
+      request_id: req.request_id,
+      ok: true,
+      stored_at: 1700000000,
+    });
+    const r = await p;
+    expect(r.ok).toBe(true);
+    expect(r.stored_at).toBe(1700000000);
+  });
+
+  it("save() surfaces vault_locked rejection from the bridge", async () => {
+    const p = env.scope.qdistroPwd.save(
+      "https://example.com/", "bob", "x", { nonce: "n9" });
+    const req = env.port.sent.find((m) => m.op === "pwd.save");
+    env.port.deliver({
+      op: "pwd.save.reply",
+      request_id: req.request_id,
+      ok: false,
+      error: "vault_locked",
+    });
+    const r = await p;
+    expect(r.error).toBe("vault_locked");
+  });
+
+  it("save() without an intent token still ships the frame with intent_token=null (bridge enforces)", async () => {
+    const p = env.scope.qdistroPwd.save(
+      "https://example.com/", "carol", "p", null);
+    const req = replyTo("pwd.save", { saved: false, error: "no_intent" });
+    expect(req.intent_token).toBeNull();
+    await p;
+  });
+
+  it("registers no inbound handlers — pwd is one-way", () => {
+    expect(env.scope.qdistroDispatcher.handlers.has("pwd.fill")).toBe(false);
+    expect(env.scope.qdistroDispatcher.handlers.has("pwd.save")).toBe(false);
+    expect(env.scope.qdistroDispatcher.handlers.has("pwd.fill_confirm")).toBe(false);
+  });
+
+  it("uses a fresh request_id per call (concurrent fills do not collide)", async () => {
+    const a = env.scope.qdistroPwd.fill("https://a.example/", null, {});
+    const b = env.scope.qdistroPwd.fill("https://b.example/", null, {});
+    const frames = env.port.sent.filter((m) => m.op === "pwd.fill");
+    expect(frames).toHaveLength(2);
+    expect(frames[0].request_id).not.toBe(frames[1].request_id);
+    env.port.deliver({ op: "pwd.fill.reply", request_id: frames[0].request_id, ok: true });
+    env.port.deliver({ op: "pwd.fill.reply", request_id: frames[1].request_id, ok: true });
+    await Promise.all([a, b]);
+  });
 });

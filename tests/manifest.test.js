@@ -53,6 +53,17 @@ describe("manifest.json permissions (P04-E parity)", () => {
     expect(manifest.host_permissions).toContain("<all_urls>");
   });
 
+  // ensures: the Firefox add-on id stays pinned. AMO signs against a
+  // fixed gecko id; if a build silently drops or rewrites it the
+  // signed update breaks (and a colliding id would clash with the
+  // bundled qdistro browser_bridge extension). The qdchrome repo
+  // guards against gecko-id *reintroduction*; here we guard the
+  // opposite direction — that the pin is present and exact.
+  it("pins browser_specific_settings.gecko.id", () => {
+    expect(manifest.browser_specific_settings?.gecko?.id)
+      .toBe("qdistro-firefox@qdistro.local");
+  });
+
   // P04 fix-pass S4 (test-integrity): closed-set assertion so a
   // future commit silently adding ``management`` / ``proxy`` /
   // ``bookmarks`` etc. fails the test. The full set of acceptable

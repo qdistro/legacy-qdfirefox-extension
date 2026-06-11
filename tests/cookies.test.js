@@ -89,4 +89,109 @@ describe("qdistroCookies", () => {
     await expect(env2.scope.qdistroCookies.exportForUrl("https://x/", token))
       .rejects.toThrow(/cookies_api_unavailable/);
   });
+
+  // --- ported edge cases (parity with qdchrome cookies suite) ---------
+
+  function waitForOutbound(e, op) {
+    return vi.waitFor(() => {
+      const m = e.port.sent.find((x) => x.op === op);
+      if (!m) throw new Error(`${op} not yet sent`);
+      return m;
+    }, { timeout: 1000 });
+  }
+
+  it("floors a fractional expirationDate and marks non-session cookies", async () => {
+    const browser = makeFakeBrowser();
+    browser.cookies.getAll = () => Promise.resolve([{
+      name: "session", value: "abc", domain: ".example.com", path: "/",
+      secure: true, httpOnly: true, sameSite: "lax",
+      expirationDate: 1700000000.7, session: false, storeId: "firefox-default",
+    }]);
+    const env2 = loadExtension({ browser, portHandle: makeFakePort() });
+    env2.scope.qdistroPort.connect();
+    const token = await env2.scope.qdistroIntent.mint("cookies.export");
+    env2.scope.qdistroCookies.exportForUrl("https://example.com/", token);
+    const frame = await waitForOutbound(env2, "cookies.export");
+    expect(frame.cookies[0]).toMatchObject({
+      name: "session", value: "abc", domain: ".example.com", path: "/",
+      secure: true, http_only: true, same_site: "lax",
+      expires: 1700000000, // floored
+      session: false,
+    });
+  });
+
+  it("flags a session cookie (no expirationDate) with expires=null", async () => {
+    const browser = makeFakeBrowser();
+    browser.cookies.getAll = () => Promise.resolve([{
+      name: "tracker", value: "xyz", domain: ".example.com", path: "/",
+      session: true, // no expirationDate
+    }]);
+    const env2 = loadExtension({ browser, portHandle: makeFakePort() });
+    env2.scope.qdistroPort.connect();
+    const token = await env2.scope.qdistroIntent.mint("cookies.export");
+    env2.scope.qdistroCookies.exportForUrl("https://example.com/", token);
+    const frame = await waitForOutbound(env2, "cookies.export");
+    expect(frame.cookies[0].expires).toBeNull();
+    expect(frame.cookies[0].session).toBe(true);
+  });
+
+  it("defaults same_site to 'no_restriction' when the cookie omits sameSite", async () => {
+    const browser = makeFakeBrowser();
+    browser.cookies.getAll = () => Promise.resolve([{
+      name: "n", value: "v", domain: ".x", path: "/",
+    }]);
+    const env2 = loadExtension({ browser, portHandle: makeFakePort() });
+    env2.scope.qdistroPort.connect();
+    const token = await env2.scope.qdistroIntent.mint("cookies.export");
+    env2.scope.qdistroCookies.exportForUrl("https://x/", token);
+    const frame = await waitForOutbound(env2, "cookies.export");
+    expect(frame.cookies[0].same_site).toBe("no_restriction");
+  });
+
+  it("handles the no-cookies case (empty array) and resolves on the bridge reply", async () => {
+    const browser = makeFakeBrowser();
+    browser.cookies.getAll = () => Promise.resolve([]);
+    const env2 = loadExtension({ browser, portHandle: makeFakePort() });
+    env2.scope.qdistroPort.connect();
+    const token = await env2.scope.qdistroIntent.mint("cookies.export");
+    const p = env2.scope.qdistroCookies.exportForUrl("https://empty.example/", token);
+    const frame = await waitForOutbound(env2, "cookies.export");
+    expect(frame.cookies).toEqual([]);
+    env2.port.deliver({
+      op: "cookies.export.reply", request_id: frame.request_id,
+      ok: true, audit_id: "audit-1", stored: 0,
+    });
+    const r = await p;
+    expect(r.ok).toBe(true);
+    expect(r.stored).toBe(0);
+  });
+
+  it("propagates a rejected cookies.getAll as the exportForUrl rejection", async () => {
+    const browser = makeFakeBrowser();
+    browser.cookies.getAll = () => Promise.reject(new Error("cookies_perm_denied"));
+    const env2 = loadExtension({ browser, portHandle: makeFakePort() });
+    env2.scope.qdistroPort.connect();
+    const token = await env2.scope.qdistroIntent.mint("cookies.export");
+    await expect(env2.scope.qdistroCookies.exportForUrl("https://x/", token))
+      .rejects.toThrow(/cookies_perm_denied/);
+    // No frame should have gone out — getAll rejected before the send.
+    expect(env2.port.sent.find((m) => m.op === "cookies.export")).toBeUndefined();
+  });
+
+  it("surfaces an audit_id from the daemon on a successful export", async () => {
+    const browser = makeFakeBrowser();
+    browser.cookies.getAll = () => Promise.resolve([]);
+    const env2 = loadExtension({ browser, portHandle: makeFakePort() });
+    env2.scope.qdistroPort.connect();
+    const token = await env2.scope.qdistroIntent.mint("cookies.export");
+    const p = env2.scope.qdistroCookies.exportForUrl("https://example.com/", token);
+    const frame = await waitForOutbound(env2, "cookies.export");
+    env2.port.deliver({
+      op: "cookies.export.reply", request_id: frame.request_id,
+      ok: true, audit_id: "ax-1", stored: 2,
+    });
+    const r = await p;
+    expect(r.audit_id).toBe("ax-1");
+    expect(r.stored).toBe(2);
+  });
 });
