@@ -60,11 +60,13 @@ describe("golden frames — cross-repo drift guard", () => {
 
   it("matches the sibling extension's golden fixture byte-for-byte", () => {
     if (!fs.existsSync(SIBLING)) {
-      // Release CI sets QDISTRO_REQUIRE_SIBLING=1 to make absence fatal.
+      // Release CI sets QDISTRO_REQUIRE_SIBLING (to any non-empty value) to
+      // make a missing sibling fatal instead of a warn-pass.
       expect(
-        process.env.QDISTRO_REQUIRE_SIBLING === "1",
-        `QDISTRO_REQUIRE_SIBLING=1 but sibling fixture not found at ${SIBLING}; ` +
-        "check out qdchrome-extension side-by-side or set $QDISTRO_SIBLING_GOLDEN.",
+        Boolean(process.env.QDISTRO_REQUIRE_SIBLING),
+        `QDISTRO_REQUIRE_SIBLING is set but the sibling fixture was not found at ` +
+        `${SIBLING}; check out qdchrome-extension side-by-side or set ` +
+        "$QDISTRO_SIBLING_GOLDEN.",
       ).toBe(false);
       // eslint-disable-next-line no-console
       console.warn(

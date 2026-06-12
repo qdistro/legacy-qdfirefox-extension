@@ -13,7 +13,7 @@
 // the other must too. If you edit one copy, edit the other and re-run
 // `npm test` in BOTH repos.
 //
-// This is now machine-enforced: `tests/fixtures/golden-frames.drift.test.js`
+// This is now machine-enforced: `tests/golden-frames-drift.test.js`
 // fails if the sibling repo's copy (checked out side-by-side, or pointed
 // at via $QDISTRO_SIBLING_GOLDEN) drifts from this one byte-for-byte. The
 // single source of truth IS this file's bytes; the drift test is the guard.
@@ -173,6 +173,34 @@ export const OUTBOUND = [
       op: "pwd.save", url: "https://example.com/signup",
       username: "bob", password: "hunter2",
     },
+    keys: ["request_id", "intent_token"],
+  },
+  {
+    name: "pwd.fill_confirm",
+    op: "pwd.fill_confirm",
+    intentOp: "pwd.fill_confirm",
+    produce: async (env) => {
+      const token = await env.scope.qdistroIntent.mint("pwd.fill_confirm");
+      void env.scope.qdistroPwd.fillConfirm(
+        "https://example.com/login", "alice", "fill-token-gf", token);
+      return token;
+    },
+    match: {
+      op: "pwd.fill_confirm", url: "https://example.com/login",
+      username: "alice", fill_token: "fill-token-gf",
+    },
+    keys: ["request_id", "intent_token"],
+  },
+  {
+    name: "page.extract",
+    op: "page.extract",
+    intentOp: "page.extract",
+    produce: async (env) => {
+      const token = await env.scope.qdistroIntent.mint("page.extract");
+      void env.scope.qdistroPageExtract.extract(7, "selection", token);
+      return token;
+    },
+    match: { op: "page.extract", destination: "selection" },
     keys: ["request_id", "intent_token"],
   },
   {

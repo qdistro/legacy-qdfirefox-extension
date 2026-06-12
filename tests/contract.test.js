@@ -19,6 +19,7 @@
 // and the sibling Chromium extension — agree on. Drift on either side
 // (a renamed field, a dropped reply key) fails here.
 import { describe, it, expect, beforeEach } from "vitest";
+import { createHmac } from "node:crypto";
 import { loadExtension, makeFakeBrowser, makeFakePort } from "./helpers.js";
 import { INBOUND, OUTBOUND } from "./fixtures/golden-frames.js";
 
@@ -122,4 +123,60 @@ describe("bridge protocol contract — OUTBOUND (extension → bridge)", () => {
       }
     });
   }
+});
+
+// The OUTBOUND contract above proves the extension FORWARDS the exact token
+// intent.js minted, but it cannot see whether that token's HMAC is one the
+// native bridge would actually ACCEPT — a mint() that signed the wrong
+// canonical (field order, separator, encoding) would still pass there. This
+// known-answer test closes that gap: it pins intent.js's HMAC to the bridge's
+// canonical `request_id|ts|op` (qdistro/browser_bridge/qdistro_browser_bridge.py
+// _compute_token_hmac: HMAC-SHA256 over UTF-8 `request_id|ts|op` keyed by the
+// raw session-secret bytes, hex). The pinned vector below was computed from BOTH
+// node:crypto and the Python bridge and matches byte-for-byte.
+describe("intent token HMAC matches the bridge canonical (known-answer)", () => {
+  // Same secret helpers.js seeds by default; pinned so the KAT is self-contained.
+  const SECRET_HEX =
+    "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+  // Reference oracle: an INDEPENDENT HMAC impl (node:crypto, vs intent.js's
+  // crypto.subtle) over the bridge's exact canonical string.
+  const bridgeHmac = (request_id, ts, op) =>
+    createHmac("sha256", Buffer.from(SECRET_HEX, "hex"))
+      .update(`${request_id}|${ts}|${op}`, "utf8").digest("hex");
+
+  it("reference oracle equals the precomputed bridge digest (integral ts)", () => {
+    // Locks the oracle itself so it can't silently drift; this exact value is
+    // also produced by the Python bridge's _compute_token_hmac.
+    expect(bridgeHmac("rid-1", 1700000000, "pwd.fill")).toBe(
+      "342b14a532db956dc362f31d58daa6507208a540423e9c19e76734908a355938");
+  });
+
+  it("oracle matches the Python bridge for a FRACTIONAL ts (float stringification)", () => {
+    // The integral vector above can't catch the one cross-stack hazard that
+    // actually bites the runtime mint() path: `ts = Date.now()/1000` is a
+    // FLOAT, and JS Number->string must agree with Python float->string inside
+    // the canonical `request_id|ts|op`. The digest below was produced by the
+    // REAL bridge `_compute_token_hmac("rid-1", 1700000000.123, "pwd.fill")`;
+    // it matches node:crypto here only because both ends shortest-round-trip
+    // the fractional value to the identical "1700000000.123". (Whole-second ts
+    // is NOT tested as a Python float on purpose: that state is unreachable —
+    // JSON.stringify serializes a whole `ts` as an integer, which Python parses
+    // back as `int`, so the integral vector above already pins that path. A
+    // Python float 1700000000.0 would stringify to "1700000000.0" and diverge,
+    // but the wire never carries it.)
+    expect(bridgeHmac("rid-1", 1700000000.123, "pwd.fill")).toBe(
+      "f3b814bb881010254137237297d328b2560b00fee52f00e4f38af562ed1df786");
+  });
+
+  it("mint() signs request_id|ts|op exactly as the bridge verifies", async () => {
+    const env = loadExtension({ browser: makeFakeBrowser(), portHandle: makeFakePort() });
+    env.scope.qdistroIntent.setSessionSecretHex(SECRET_HEX);
+    const tok = await env.scope.qdistroIntent.mint("pwd.fill");
+    expect(tok.hmac, "intent.js HMAC must match the bridge canonical")
+      .toBe(bridgeHmac(tok.request_id, tok.ts, tok.op));
+    // Negative control: a permuted canonical (op|ts|request_id) must NOT match,
+    // proving the assertion discriminates field order — the exact drift that
+    // would otherwise ship green.
+    expect(tok.hmac).not.toBe(bridgeHmac(tok.op, tok.ts, tok.request_id));
+  });
 });
