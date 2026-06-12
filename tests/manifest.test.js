@@ -29,20 +29,45 @@ describe("manifest.json content_scripts", () => {
   });
 });
 
-// P04-E parity check — P0-5 fix. The pwd.fill content script
-// needs scripting + webNavigation to inject into freshly-navigated
-// frames. Both must be declared.
-describe("manifest.json permissions (P04-E parity)", () => {
+// P0-5 (S8) — minimal-permission pin. With the v1 bridge op set frozen
+// (D5: ping + the existing Phase-8 / intent-token / 9e-relay handlers plus
+// the Firefox-only containers.* relay; no new ops), the manifest must
+// declare EXACTLY the permissions the ops this extension actually SERVICES
+// use. Each maps to a registered handler (see src/modules/*):
+//   nativeMessaging      → the bridge port (all ops)
+//   tabs                 → tabs.list/open/close (activeTab can't see other windows)
+//   cookies              → cookies.export
+//   downloads            → downloads.notify
+//   notifications        → notifications.show
+//   contextMenus         → the page.extract right-click entry (pageExtract.js)
+//   contextualIdentities → containers.list/create/remove (Firefox containers)
+//   scripting            → on-demand page.extract injection (scripting.executeScript);
+//                          pwd-fill uses the static all_frames content script, not this
+//   storage              → options-page module/origin gate persistence
+// Not every D5 op is serviced HERE: `clipboard.set` is handled native-side
+// by the bridge daemon (no clipboard handler or clipboard permission exists
+// in this extension — a content-script clipboard write needs no manifest
+// permission anyway), and the pwd/mpris/screenlock relays ride the kept
+// permissions above. host_permissions <all_urls> already covers
+// content-script injection + cookies + scripting.executeScript, so
+// `activeTab` adds nothing, and no module registers a navigation listener,
+// so `webNavigation` is dead — both are asserted ABSENT so they can't
+// silently creep back.
+describe("manifest.json permissions (P0-5 minimal set)", () => {
   it("declares nativeMessaging for the bridge port", () => {
     expect(manifest.permissions).toContain("nativeMessaging");
   });
 
-  it("declares scripting for pwd-content injection", () => {
+  it("declares scripting for on-demand page.extract injection", () => {
     expect(manifest.permissions).toContain("scripting");
   });
 
-  it("declares webNavigation for pwd-fill on freshly navigated frames", () => {
-    expect(manifest.permissions).toContain("webNavigation");
+  it("does NOT declare webNavigation (no navigation listener in src)", () => {
+    expect(manifest.permissions).not.toContain("webNavigation");
+  });
+
+  it("does NOT declare activeTab (redundant with <all_urls> + tabs)", () => {
+    expect(manifest.permissions).not.toContain("activeTab");
   });
 
   it("keeps contextualIdentities (Firefox containers)", () => {
@@ -51,6 +76,18 @@ describe("manifest.json permissions (P04-E parity)", () => {
 
   it("MV3 host_permissions covers all urls", () => {
     expect(manifest.host_permissions).toContain("<all_urls>");
+  });
+
+  // host_permissions is itself a capability surface; pin it exactly and pin
+  // the optional buckets empty so the minimal set can't be widened via a
+  // door the permissions-array assertions don't watch.
+  it("host_permissions is exactly [<all_urls>] — no extra hosts", () => {
+    expect(manifest.host_permissions).toEqual(["<all_urls>"]);
+  });
+
+  it("declares no optional_permissions / optional_host_permissions", () => {
+    expect(manifest.optional_permissions ?? []).toEqual([]);
+    expect(manifest.optional_host_permissions ?? []).toEqual([]);
   });
 
   // ensures: the Firefox add-on id stays pinned. AMO signs against a
@@ -73,14 +110,12 @@ describe("manifest.json permissions (P04-E parity)", () => {
     const expected = new Set([
       "nativeMessaging",
       "tabs",
-      "activeTab",
       "cookies",
       "downloads",
       "notifications",
       "contextMenus",
       "contextualIdentities",
       "scripting",
-      "webNavigation",
       "storage",
     ]);
     const actual = new Set(manifest.permissions || []);

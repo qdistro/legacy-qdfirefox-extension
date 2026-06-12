@@ -12,14 +12,12 @@
   "permissions": [
     "nativeMessaging",
     "tabs",
-    "activeTab",
     "cookies",
     "downloads",
     "notifications",
     "contextMenus",
     "contextualIdentities",
     "scripting",
-    "webNavigation",
     "storage"
   ],
   "host_permissions": [

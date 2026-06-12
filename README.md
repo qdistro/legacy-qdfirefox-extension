@@ -117,7 +117,7 @@ This extension grants itself a wide host-permission (`<all_urls>`) plus `nativeM
 | Permission              | Why                                                      |
 |-------------------------|----------------------------------------------------------|
 | `nativeMessaging`       | the whole point — talks to the bridge                    |
-| `tabs`, `activeTab`     | tabs.list across windows; popup needs the current tab    |
+| `tabs`                  | tabs.list across windows                                 |
 | `cookies`               | cookies.export                                           |
 | `downloads`             | onChanged listener                                       |
 | `notifications`         | show / receive notification events                       |
@@ -126,6 +126,18 @@ This extension grants itself a wide host-permission (`<all_urls>`) plus `nativeM
 | `scripting`             | page.extract (selection capture)                         |
 | `storage`               | options page                                             |
 | `<all_urls>`            | cookies, page.extract work across origins                |
+
+The set is pinned minimal for the frozen v1 op set (closed-set test in
+`tests/manifest.test.js`). `activeTab` (redundant with `<all_urls>` +
+`tabs`) and `webNavigation` (no navigation listener in `src/`) were dropped
+under S8 P0-5; new permissions require updating the test after a security
+review.
+
+Firefox MV3 treats `host_permissions` as user-controllable origin grants;
+the extension assumes the `<all_urls>` grant is in effect (the supported
+deployment installs it via enterprise `force_installed` policy). Without it,
+the static content scripts and the context-menu `page.extract` path do not
+function — there is no narrower fallback, by design.
 
 ## Architecture
 
