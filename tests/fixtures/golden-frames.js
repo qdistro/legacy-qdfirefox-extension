@@ -12,6 +12,11 @@
 // it is talking to), so a frame that one extension accepts/produces
 // the other must too. If you edit one copy, edit the other and re-run
 // `npm test` in BOTH repos.
+//
+// This is now machine-enforced: `tests/fixtures/golden-frames.drift.test.js`
+// fails if the sibling repo's copy (checked out side-by-side, or pointed
+// at via $QDISTRO_SIBLING_GOLDEN) drifts from this one byte-for-byte. The
+// single source of truth IS this file's bytes; the drift test is the guard.
 // =====================================================================
 //
 // Two frame directions:
@@ -28,7 +33,12 @@
 //              carry. The bridge is the consumer.
 //
 // The contract test (tests/contract.test.js) drives the REAL handlers
-// and module functions against these frames — they are not stubs.
+// and module functions against these frames — they are not stubs. For
+// privileged outbound ops it also mints a REAL intent token via the
+// extension's own intent.js (`intentOp` below) instead of a placeholder,
+// so the produced frame carries a structurally-valid HMAC token bound to
+// the operation — the same token the bridge's `verify_intent_token`
+// checks. A frame that forwarded a bogus/absent token would fail there.
 //
 // @ts-check
 
@@ -90,9 +100,22 @@ export const INBOUND = [
 ];
 
 // Canonical OUTBOUND frames (extension → bridge). `produce` is invoked
-// by the contract test with the loaded env; it must trigger the module
-// and return the op string to look for. `match` is a partial object the
-// produced frame must matchObject; `keys` lists keys that must exist.
+// (awaited) by the contract test with the loaded env; it triggers the
+// real module and the produced frame is read off the fake port. `match`
+// is a partial object the frame must matchObject; `keys` lists keys that
+// must exist.
+//
+// `intentOp`: when set, the frame carries an intent token and `produce`
+// mints a REAL one via `env.scope.qdistroIntent.mint(intentOp)` AND
+// RETURNS it. The contract test asserts the forwarded `intent_token`
+// deep-equals that returned object — i.e. the extension forwarded the
+// exact token the real intent.js minted (request_id + ts + op === intentOp
+// + a genuine sha256-hex hmac over the session secret), not a stub and
+// not a re-fabricated look-alike the bridge would reject.
+//
+// `op_via`: a frame driven through a browser-event/callback path that
+// differs between Chromium (callback) and Firefox (Promise); the contract
+// test owns that per-browser trigger. Everything else uses `produce`.
 export const OUTBOUND = [
   {
     name: "screenlock.inhibit",
@@ -126,10 +149,11 @@ export const OUTBOUND = [
   {
     name: "pwd.fill",
     op: "pwd.fill",
-    produce: (env) => {
-      void env.scope.qdistroPwd.fill("https://example.com/login", "alice", {
-        operation: "pwd.fill", nonce: "gf-1",
-      });
+    intentOp: "pwd.fill",
+    produce: async (env) => {
+      const token = await env.scope.qdistroIntent.mint("pwd.fill");
+      void env.scope.qdistroPwd.fill("https://example.com/login", "alice", token);
+      return token;
     },
     match: {
       op: "pwd.fill", url: "https://example.com/login", username: "alice",
@@ -139,10 +163,11 @@ export const OUTBOUND = [
   {
     name: "pwd.save",
     op: "pwd.save",
-    produce: (env) => {
-      void env.scope.qdistroPwd.save("https://example.com/signup", "bob", "hunter2", {
-        operation: "pwd.save", nonce: "gf-2",
-      });
+    intentOp: "pwd.save",
+    produce: async (env) => {
+      const token = await env.scope.qdistroIntent.mint("pwd.save");
+      void env.scope.qdistroPwd.save("https://example.com/signup", "bob", "hunter2", token);
+      return token;
     },
     match: {
       op: "pwd.save", url: "https://example.com/signup",
@@ -162,7 +187,12 @@ export const OUTBOUND = [
   {
     name: "cookies.export",
     op: "cookies.export",
-    op_via: "cookies",
+    intentOp: "cookies.export",
+    produce: async (env) => {
+      const token = await env.scope.qdistroIntent.mint("cookies.export");
+      void env.scope.qdistroCookies.exportForUrl("https://example.com/", token);
+      return token;
+    },
     match: { op: "cookies.export", url: "https://example.com/" },
     keys: ["request_id", "intent_token", "cookies"],
   },
