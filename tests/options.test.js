@@ -5,10 +5,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import vm from "node:vm";
 
 const ROOT = resolve(__dirname, "..", "src");
 const OPTIONS_HTML = readFileSync(resolve(ROOT, "options.html"), "utf8");
-const OPTIONS_JS = readFileSync(resolve(ROOT, "options.js"), "utf8");
+const OPTIONS_JS_PATH = resolve(ROOT, "options.js");
+const OPTIONS_JS = readFileSync(OPTIONS_JS_PATH, "utf8");
 
 const MODULES = [
   "tabs", "pwd", "pageExtract", "cookies", "containers",
@@ -40,8 +42,10 @@ async function loadOptions(env) {
   const bodyMatch = OPTIONS_HTML.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
   document.body.innerHTML = bodyMatch ? bodyMatch[1] : OPTIONS_HTML;
   globalThis.browser = env.browser;
-  // eslint-disable-next-line no-new-func
-  new Function(OPTIONS_JS)();
+  // Compile with the real on-disk `filename` (vs `new Function`'s anonymous,
+  // URL-less script) so V8 coverage attributes lines to src/options.js.
+  // No parsingContext => current (jsdom) context, so document stays available.
+  vm.compileFunction(OPTIONS_JS, [], { filename: OPTIONS_JS_PATH })();
   // load() runs at module load (async; awaits browser.storage.local.get).
   await new Promise((r) => setTimeout(r, 0));
 }

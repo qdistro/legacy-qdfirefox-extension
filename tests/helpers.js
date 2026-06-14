@@ -13,6 +13,7 @@
 // @ts-check
 import fs from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 import { webcrypto } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
@@ -154,14 +155,21 @@ export function loadExtension(opts = {}) {
   scope.Symbol = Symbol;
 
   function evalFile(rel) {
-    const code = fs.readFileSync(path.join(SRC, rel), "utf8");
-    // Each source is an IIFE bound to `self`. We pass `browser` as
-    // an extra param so the api.js `typeof browser !== "undefined"`
-    // check sees the synthetic object.
-    const wrapped =
-      `(function(self, browser, console){\n${code}\n}).call(__scope__, __scope__, __scope__.browser, __scope__.console)`;
-    const fn = new Function("__scope__", `return ${wrapped};`);
-    fn(scope);
+    const filename = path.join(SRC, rel);
+    const code = fs.readFileSync(filename, "utf8");
+    // Each source is an IIFE bound to `self`. We pass `browser` as an extra
+    // param so the api.js `typeof browser !== "undefined"` check sees the
+    // synthetic object, and run with `this` === scope. Compiling via
+    // vm.compileFunction with the real on-disk `filename` is what lets the V8
+    // coverage provider attribute the executed lines back to src/<rel> (a bare
+    // `new Function` produces an anonymous script with no URL, so coverage
+    // stays 0%).
+    const fn = vm.compileFunction(
+      code,
+      ["self", "browser", "console"],
+      { filename },
+    );
+    fn.call(scope, scope, scope.browser, scope.console);
   }
 
   evalFile("api.js");

@@ -5,10 +5,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import vm from "node:vm";
 
 const ROOT = resolve(__dirname, "..", "src");
 const POPUP_HTML = readFileSync(resolve(ROOT, "popup.html"), "utf8");
-const POPUP_JS = readFileSync(resolve(ROOT, "popup.js"), "utf8");
+const POPUP_JS_PATH = resolve(ROOT, "popup.js");
+const POPUP_JS = readFileSync(POPUP_JS_PATH, "utf8");
 
 function makeFakeBrowser() {
   const sent = [];
@@ -45,8 +47,10 @@ async function loadPopup(env) {
   const bodyMatch = POPUP_HTML.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
   document.body.innerHTML = bodyMatch ? bodyMatch[1] : POPUP_HTML;
   globalThis.browser = env.browser;
-  // eslint-disable-next-line no-new-func
-  new Function(POPUP_JS)();
+  // Compile with the real on-disk `filename` (vs `new Function`'s anonymous,
+  // URL-less script) so V8 coverage attributes lines to src/popup.js.
+  // No parsingContext => current (jsdom) context, so document stays available.
+  vm.compileFunction(POPUP_JS, [], { filename: POPUP_JS_PATH })();
   // refreshStatus + loadContainers run at module load.
   await new Promise((r) => setTimeout(r, 0));
 }

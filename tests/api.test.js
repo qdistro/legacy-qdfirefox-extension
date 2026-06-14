@@ -35,7 +35,9 @@ function runApi({ withBrowser, withChrome }) {
   if (withBrowser) ctx.browser = { __surface: "browser" };
   if (withChrome) ctx.chrome = { __surface: "chrome" };
   vm.createContext(ctx);
-  vm.runInContext(API_SRC, ctx);
+  vm.runInContext(API_SRC, ctx, {
+    filename: path.resolve(__dirname, "..", "src", "api.js"),
+  });
   return root.qdistroApi;
 }
 
