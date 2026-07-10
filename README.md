@@ -24,7 +24,9 @@ qdchrome-extension can build a Firefox MV2 xpi (concatenated bundle, `chrome.*` 
 
 ## Status
 
-v0.2.0 — 9 modules + 3 content-script observers. 71 vitest cases, all green.
+In development, tracking the v1 bridge op set. The module table below is the
+intended surface; the vitest suite (see [Test](#test)) and the cross-repo
+golden-frame contract tests are the source of truth for what is covered.
 
 | Module           | Direction        | Ops                                                 |
 |------------------|------------------|-----------------------------------------------------|
@@ -74,7 +76,11 @@ WEB_EXT_API_KEY=... WEB_EXT_API_SECRET=... bash scripts/build-extension.sh --sig
 npm test
 ```
 
-Vitest, no jsdom. Each test loads the source files into a synthetic `self` global with a `browser.*` Promise-API shim — same shape as qdchrome-extension's helpers.
+Vitest. Most suites load the source files into a synthetic `self` global with
+a `browser.*` Promise-API shim — same shape as qdchrome-extension's helpers;
+DOM-facing suites (popup, options, content scripts) opt into jsdom via
+`@vitest-environment` pragmas. The two extension repos are developed in
+lockstep and share cross-repo "golden frame" wire-contract tests.
 
 ## Install (development)
 
