@@ -198,8 +198,9 @@ if (api && api.runtime && api.runtime.onMessage) {
 
           // ---- content-script entry points ---------------------------
           // Each mints/forwards an intent token where the bridge
-          // requires one; tokens carry hmac=null in MVP (see
-          // todo/06-intent-token-hmac.md).
+          // requires one. Tokens are HMAC-SHA256 keyed with the
+          // qdistro.handshake session secret (src/intent.js); the old
+          // hmac=null MVP shape is gone.
 
           case "pwd.request_fill": {
             // Finding #10: the page-supplied req.url is untrusted.
