@@ -27,8 +27,19 @@
 //     never-saved config must not silently disable every feature, and
 //     it matches the manifest's content_scripts being declared. Once
 //     the user saves, the explicit booleans win (including `false`).
-//   - An EMPTY allowlist means "all origins" (the options page says so
-//     in the UI). A NON-empty allowlist restricts to listed origins.
+//   - The origin allowlist is CLOSED BY DEFAULT (opus HIGH J11): an
+//     EMPTY / unset allowlist denies every page-initiated (content-
+//     script) op, so a fresh or never-configured install does not ship
+//     the credential/extraction surface open to every site the user
+//     visits. To operate the extension the user lists the origins that
+//     may drive the bridge, or enters a single `*` entry to explicitly
+//     opt in to all origins (the old wide-open behaviour, now a
+//     deliberate choice rather than the silent default). A NON-empty,
+//     non-`*` allowlist restricts to the listed origins.
+//     NOTE: this gate covers only content-script / page-initiated ops.
+//     Bridge-initiated ops carry their own origin check at their call
+//     sites (they too consult isOriginAllowed), and module on/off is a
+//     separate gate — the allowlist never widens a disabled module.
 //
 // Infrastructure ops (qdistro.*: handshake, ping, heartbeat) are never
 // gated — they're the transport, not a feature.
@@ -87,7 +98,7 @@
   // per key. `loaded` flips true once the first storage read returns.
   const state = {
     modules: null,           // {tabs:bool,...} or null
-    allowlist: [],           // string[]; empty = all origins
+    allowlist: [],           // string[]; empty = deny all (closed by default)
     loaded: false,           // has the first storage.local.get returned?
   };
 
@@ -137,7 +148,7 @@
         usedPromise = true;
         got.then(applyConfig, () => { markReady(); });
       }
-    } catch (_) { markReady(); /* keep defaults (all enabled, all origins) */ }
+    } catch (_) { markReady(); /* keep defaults: all modules enabled, allowlist closed (no origins) */ }
   }
 
   function watch() {
@@ -215,15 +226,22 @@
     return parsed.host === pat;
   }
 
-  // Empty allowlist = all origins allowed. Non-empty = url must match an
-  // entry. A URL we can't parse (chrome://, blank tab, opaque origin) is
-  // REJECTED when an allowlist is set — the allowlist is an explicit
-  // "only these origins" instruction.
+  // CLOSED BY DEFAULT (opus HIGH J11). An empty / unset allowlist denies
+  // every origin — a fresh install must not ship the page-initiated
+  // credential/extraction surface open to every site. A single `*` entry
+  // is the explicit opt-in to "all origins" (the pre-J11 wide-open
+  // behaviour, now a deliberate user choice) and short-circuits to allow,
+  // matching the old empty-means-all semantics including opaque URLs.
+  // Otherwise the url must match a listed entry. A URL we can't parse
+  // (chrome://, blank tab, opaque origin) is REJECTED unless `*` is set —
+  // the allowlist is an explicit "only these origins" instruction.
   function isOriginAllowed(url) {
-    if (!state.allowlist.length) return true;
+    const list = state.allowlist;
+    if (!list.length) return false;                       // closed by default
+    if (list.some((e) => String(e || "").trim() === "*")) return true; // explicit all-origins
     const parsed = parseUrl(url);
     if (!parsed) return false;
-    for (const entry of state.allowlist) {
+    for (const entry of list) {
       if (entryMatches(entry, parsed)) return true;
     }
     return false;

@@ -149,7 +149,16 @@
         if (root.qdistroGate.ready && !root.qdistroGate.isLoaded()) {
           await root.qdistroGate.ready();
         }
-        if (!root.qdistroGate.isOriginAllowed(tab.url || "")) return;
+        if (!root.qdistroGate.isOriginAllowed(tab.url || "")) {
+          // The allowlist is closed by default (J11). A user-gesture
+          // extract that is refused would otherwise be a silent no-op —
+          // log where to fix it so the feature doesn't look broken.
+          console.warn(
+            "[qdistro/pageExtract] extract refused: origin not on the "
+            + "allowlist. Add the origin (or `*`) on the extension's "
+            + "options page to enable page extraction here.");
+          return;
+        }
       }
       try {
         const intentToken = root.qdistroIntent

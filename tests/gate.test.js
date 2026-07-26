@@ -103,9 +103,40 @@ describe("qdistroGate — module enablement", () => {
 });
 
 describe("qdistroGate — origin allowlist", () => {
-  it("allows all origins when empty", async () => {
+  it("denies every origin when the allowlist is empty (closed by default, J11)", async () => {
+    // Empty/unset allowlist is now closed — a fresh install ships the
+    // page-initiated surface off, not open to every site.
     const g = (await loadGate()).scope.qdistroGate;
-    expect(g.isOriginAllowed("https://anything.example")).toBe(true);
+    expect(g.isOriginAllowed("https://anything.example")).toBe(false);
+    expect(g.isOriginAllowed("https://example.com/login")).toBe(false);
+  });
+
+  it("allows all origins ONLY when `*` is explicitly listed (J11 opt-in)", async () => {
+    const browser = fakeBrowserWithConfig({ origin_allowlist: ["*"] });
+    const g = (await loadGate(browser)).scope.qdistroGate;
+    expect(g.isOriginAllowed("https://anything.example/")).toBe(true);
+    expect(g.isOriginAllowed("http://plain.test/")).toBe(true);
+    // `*` restores the pre-J11 semantics, including opaque/unparsable
+    // URLs, so it is a faithful "all origins" replacement.
+    expect(g.isOriginAllowed("moz-extension://x/options.html")).toBe(true);
+    expect(g.isOriginAllowed("about:blank")).toBe(true);
+  });
+
+  it("treats `*` as all-origins even alongside other entries", async () => {
+    const browser = fakeBrowserWithConfig({
+      origin_allowlist: ["https://example.com", "*"],
+    });
+    const g = (await loadGate(browser)).scope.qdistroGate;
+    expect(g.isOriginAllowed("https://unlisted.test/")).toBe(true);
+  });
+
+  it("does NOT treat a bare-host `*` lookalike as all-origins", async () => {
+    // A literal host entry that merely contains a star (e.g. a typo)
+    // must not open the gate — only an entry that is exactly `*`.
+    const browser = fakeBrowserWithConfig({ origin_allowlist: ["*.example.com"] });
+    const g = (await loadGate(browser)).scope.qdistroGate;
+    expect(g.isOriginAllowed("https://app.example.com/")).toBe(true);
+    expect(g.isOriginAllowed("https://unlisted.test/")).toBe(false);
   });
 
   it("restricts to exact hosts and supports *. wildcards", async () => {
@@ -203,6 +234,17 @@ describe("background onMessage gating via gate", () => {
     const r = await env.sendMessage(
       { kind: "pwd.request_fill", url: "https://evil.test/" },
       tabSender("https://evil.test/"),
+    );
+    expect(r).toEqual({ ok: false, error: "origin_not_allowed" });
+  });
+
+  it("refuses a content-script op when NO allowlist is configured (closed by default, J11)", async () => {
+    // No origin_allowlist saved → the default is now closed, so even a
+    // benign-looking site cannot drive the bridge until the user opts in.
+    const env = await loadBg(fakeBrowserWithConfig({}));
+    const r = await env.sendMessage(
+      { kind: "pwd.request_fill", url: "https://anything.example/" },
+      tabSender("https://anything.example/"),
     );
     expect(r).toEqual({ ok: false, error: "origin_not_allowed" });
   });

@@ -120,6 +120,25 @@ export function makeFakeBrowser(overrides = {}) {
   return Object.assign(fakes, overrides);
 }
 
+// A fake browser whose stored config opts in to all origins (a single
+// `*` allowlist entry). Since J11 the origin allowlist is CLOSED BY
+// DEFAULT, so tests that exercise op-forwarding mechanics (not the
+// origin gate itself) must explicitly allow origins or every
+// page-initiated op is refused. Origin-gate behaviour is covered
+// directly in gate.test.js.
+export function makeFakeBrowserAllOrigins(overrides = {}) {
+  const browser = makeFakeBrowser(overrides);
+  const local = browser.storage.local;
+  browser.storage = {
+    ...browser.storage,
+    local: {
+      ...local,
+      get: (_keys) => Promise.resolve({ origin_allowlist: ["*"] }),
+    },
+  };
+  return browser;
+}
+
 export { makeEvent };
 
 /**
