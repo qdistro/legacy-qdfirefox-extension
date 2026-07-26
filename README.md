@@ -16,7 +16,7 @@ context boundary than a plain profile alone.
 
 ## Why a separate repo
 
-qdchrome-extension can build a Firefox MV2 xpi (concatenated bundle, `chrome.*` callback API). This repo is the Firefox-native counterpart:
+qdchrome-extension used to build a Firefox MV2 xpi (concatenated bundle, `chrome.*` callback API); that target was removed, and this repo is now the *only* source of the qdistro Firefox extension. It is Firefox-native:
 
 - **MV3** (`browser.scripts` event page, not the deprecated MV2 background page)
 - **`browser.*` Promise API** throughout — no callback-shim
