@@ -2,7 +2,7 @@
 //
 // Listens to browser.downloads.onChanged and forwards state
 // transitions (start / progress / complete / interrupted) to the
-// bridge as `downloads.update`. The bridge re-exposes these on
+// bridge as `downloads.notify`. The bridge re-exposes these on
 // qbus-admin so the admin notification area can show downloads
 // across users.
 //

@@ -6,6 +6,7 @@
   "scripts": {
     "build": "bash scripts/build-extension.sh",
     "test": "vitest run",
+    "test:release": "QDISTRO_REQUIRE_SIBLING=1 vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {
