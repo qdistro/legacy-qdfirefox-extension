@@ -23,10 +23,27 @@ set -euo pipefail
 
 HOST_NAME="qdistro"
 EXT_ID="qdistro-firefox@qdistro.local"
-BRIDGE_PATH="${QDISTRO_BRIDGE_PATH:-$(command -v qdistro-browser-bridge 2>/dev/null || true)}"
+# Resolve the bridge against a PACKAGED install first, then a dev checkout:
+#   1. $QDISTRO_BRIDGE_PATH (explicit wins)
+#   2. /usr/lib/qdistro/browser-bridge — where the qdistro installer actually
+#      puts the native-messaging host. NOTE: no `qdistro-browser-bridge` binary
+#      is ever installed on PATH (the installed CLI is qdistro-browser-install),
+#      so the old PATH-only lookup failed on every real install and this script
+#      only worked when the caller happened to set the env var by hand.
+#   3. `qdistro-browser-bridge` on PATH, for a dev tree that exports one.
+# Overridable ONLY so the test suite can exercise the precedence branch on a
+# host with no qdistro install; production callers use QDISTRO_BRIDGE_PATH.
+DEFAULT_BRIDGE_PATH="${QDISTRO_DEFAULT_BRIDGE_PATH:-/usr/lib/qdistro/browser-bridge}"
+BRIDGE_PATH="${QDISTRO_BRIDGE_PATH:-}"
+if [[ -z "$BRIDGE_PATH" && -x "$DEFAULT_BRIDGE_PATH" ]]; then
+    BRIDGE_PATH="$DEFAULT_BRIDGE_PATH"
+fi
+if [[ -z "$BRIDGE_PATH" ]]; then
+    BRIDGE_PATH="$(command -v qdistro-browser-bridge 2>/dev/null || true)"
+fi
 
 if [[ -z "$BRIDGE_PATH" ]]; then
-    echo "[install-native-host] QDISTRO_BRIDGE_PATH unset and qdistro-browser-bridge not on PATH" >&2
+    echo "[install-native-host] no bridge found: set QDISTRO_BRIDGE_PATH, or install qdistro (expected $DEFAULT_BRIDGE_PATH)" >&2
     exit 1
 fi
 
