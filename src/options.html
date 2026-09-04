@@ -36,8 +36,11 @@
   <h2>Per-origin allowlist</h2>
   <fieldset>
     <legend>Only run modules on these origins</legend>
-    <p class="muted">One origin per line. Leave empty for "all origins."
-       Match is exact-host (no glob); subdomain matching is explicit.</p>
+    <p class="muted">One origin per line. <strong>Closed by default:</strong>
+       leave empty to block all page-initiated operations. Enter
+       <code>*</code> on its own line to allow all origins. Match is
+       exact-host (no glob); subdomain matching is explicit
+       (<code>https://*.internal.corp</code>).</p>
     <textarea id="origin-allowlist" placeholder="https://example.com&#10;https://*.internal.corp"></textarea>
   </fieldset>
 

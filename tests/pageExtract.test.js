@@ -1,11 +1,14 @@
 // pageExtract module — context-menu-driven capture.
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { loadExtension, makeFakeBrowser, makeFakePort } from "./helpers.js";
+import { loadExtension, makeFakeBrowser, makeFakeBrowserAllOrigins, makeFakePort } from "./helpers.js";
 
 describe("qdistroPageExtract", () => {
   let env;
   beforeEach(() => {
-    const browser = makeFakeBrowser();
+    // Origin gate is closed by default since J11; these tests exercise
+    // the extract flow, so opt in to all origins (`*`). Origin filtering
+    // for extract is covered in gate.test.js.
+    const browser = makeFakeBrowserAllOrigins();
     browser.scripting.executeScript = () => Promise.resolve([{
       result: { selected_text: "hello", url: "https://x/", title: "X" },
     }]);
@@ -68,7 +71,9 @@ describe("qdistroPageExtract", () => {
 
   describe("page.extract.request (bridge → ext)", () => {
     function makeEnv(executeScript) {
-      const browser = makeFakeBrowser();
+      // Origin gate is closed by default since J11; the bridge→ext
+      // extract tests target a normal tab, so opt in to all origins.
+      const browser = makeFakeBrowserAllOrigins();
       browser.scripting.executeScript = executeScript;
       const e = loadExtension({ browser, portHandle: makeFakePort() });
       e.scope.qdistroPort.connect();

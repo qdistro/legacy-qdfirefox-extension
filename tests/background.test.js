@@ -1,12 +1,15 @@
 // background.js — runtime.onMessage entry points for popup and the
 // pwd/mpris/screenlock content scripts.
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { loadWithBackground, makeFakeBrowser, makeFakePort } from "./helpers.js";
+import { loadWithBackground, makeFakeBrowserAllOrigins, makeFakePort } from "./helpers.js";
 
 describe("background runtime.onMessage", () => {
   let env;
   beforeEach(() => {
-    env = loadWithBackground();
+    // Origin gate is closed by default since J11; these tests exercise
+    // op-forwarding, so opt in to all origins (`*`) — origin filtering
+    // itself is covered in gate.test.js.
+    env = loadWithBackground({ browser: makeFakeBrowserAllOrigins() });
     env.scope.qdistroPort.connect();
   });
 
