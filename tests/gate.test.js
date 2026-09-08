@@ -116,7 +116,9 @@ describe("qdistroGate — origin allowlist", () => {
     const g = (await loadGate(browser)).scope.qdistroGate;
     expect(g.isOriginAllowed("https://anything.example/")).toBe(true);
     expect(g.isOriginAllowed("http://plain.test/")).toBe(true);
-    // `*` restores the pre-J11 semantics, including opaque/unparsable URLs.
+    // `*` restores the pre-J11 semantics, including opaque/unparsable
+    // URLs, so it is a faithful "all origins" replacement.
+    expect(g.isOriginAllowed("moz-extension://x/options.html")).toBe(true);
     expect(g.isOriginAllowed("about:blank")).toBe(true);
   });
 
@@ -126,6 +128,7 @@ describe("qdistroGate — origin allowlist", () => {
     });
     const g = (await loadGate(browser)).scope.qdistroGate;
     expect(g.isOriginAllowed("https://evil.test/")).toBe(true);
+    expect(g.isOriginAllowed("https://unlisted.test/")).toBe(true);
   });
 
   it("does NOT treat a bare-host `*` lookalike as all-origins", async () => {
@@ -247,6 +250,22 @@ describe("background onMessage gating via gate", () => {
     expect(r).toEqual({ ok: false, error: "origin_not_allowed" });
   });
 
+  it("FAILS CLOSED when the gate module is absent entirely", async () => {
+    // The gate used to be consulted as `self.qdistroGate && !allowed`,
+    // so an extension whose gate.js never loaded (or threw before
+    // exporting) ran every page-initiated op ungated — the same
+    // end state J11 was about. Deleting the export must deny, not allow.
+    const env = await loadBg(fakeBrowserWithConfig({
+      origin_allowlist: ["https://allowed.example"],
+    }));
+    delete env.scope.qdistroGate;
+    const r = await env.sendMessage(
+      { kind: "pwd.request_fill", url: "https://allowed.example/" },
+      tabSender("https://allowed.example/"),
+    );
+    expect(r).toEqual({ ok: false, error: "origin_not_allowed" });
+  });
+
   it("status bypasses the module gate", async () => {
     const browser = fakeBrowserWithConfig({ modules: { cookies: false } });
     const env = await loadBg(browser);
@@ -284,6 +303,23 @@ describe("background onMessage gating via gate", () => {
       },
     );
     expect(r).toEqual({ ok: false, error: "origin_not_allowed" });
+  });
+});
+
+describe("page.extract fails closed when the gate module is absent", () => {
+  it("bridge-initiated page.extract.request refuses with no gate", async () => {
+    const browser = fakeBrowserWithConfig({ origin_allowlist: ["*"] });
+    const env = loadExtension({ browser });
+    await new Promise((r) => setTimeout(r, 0));
+    env.scope.qdistroPort.connect();
+    delete env.scope.qdistroGate;
+    await env.scope.qdistroDispatcher.handleInbound({
+      op: "page.extract.request", request_id: 9, tab_id: 5,
+      mode: "visible_text",
+    });
+    const reply = env.port.sent.find(
+      (m) => m.op === "page.extract.request.reply");
+    expect(reply).toMatchObject({ ok: false, error: "origin_not_allowed" });
   });
 });
 

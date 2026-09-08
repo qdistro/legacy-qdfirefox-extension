@@ -124,7 +124,7 @@ function pwdSenderUrl(req, sender) {
   // the top frame (codex finding #3). Fall back to tabUrl when the
   // frame URL is unavailable.
   const frameUrl = (sender && sender.url) || tabUrl;
-  if (self.qdistroGate && !self.qdistroGate.isOriginAllowed(frameUrl)) {
+  if (!self.qdistroGate || !self.qdistroGate.isOriginAllowed(frameUrl)) {
     return { ok: false, error: "origin_not_allowed" };
   }
   return { ok: true, url: tabUrl };
@@ -180,7 +180,7 @@ if (api && api.runtime && api.runtime.onMessage) {
             if (!url) {
               return { ok: false, error: "no_active_tab" };
             }
-            if (self.qdistroGate && !self.qdistroGate.isOriginAllowed(url)) {
+            if (!self.qdistroGate || !self.qdistroGate.isOriginAllowed(url)) {
               return { ok: false, error: "origin_not_allowed" };
             }
             const storeId = (tab && tab.cookieStoreId) || null;
@@ -256,7 +256,7 @@ if (api && api.runtime && api.runtime.onMessage) {
             // is the real frame URL set by the browser (sender.url),
             // not the page-supplied req.url. Fall back to the tab URL.
             const mprisUrl = sender.url || (sender.tab && sender.tab.url) || "";
-            if (self.qdistroGate && !self.qdistroGate.isOriginAllowed(mprisUrl)) {
+            if (!self.qdistroGate || !self.qdistroGate.isOriginAllowed(mprisUrl)) {
               return { ok: false, error: "origin_not_allowed" };
             }
             // Fire-and-forget — the page polls 1Hz; we don't want
@@ -276,7 +276,7 @@ if (api && api.runtime && api.runtime.onMessage) {
           }
           case "screenlock.report_inhibit": {
             const slUrl = sender.url || (sender.tab && sender.tab.url) || "";
-            if (self.qdistroGate && !self.qdistroGate.isOriginAllowed(slUrl)) {
+            if (!self.qdistroGate || !self.qdistroGate.isOriginAllowed(slUrl)) {
               return { ok: false, error: "origin_not_allowed" };
             }
             const tabId = sender.tab && sender.tab.id;

@@ -145,7 +145,16 @@
       // context-menu click can't slip past the allowlist while it's
       // still loading (codex #1 follow-up). Module on/off is gated
       // downstream in the dispatcher.
-      if (root.qdistroGate) {
+      // FAIL CLOSED if the gate module is absent (never loaded, or it
+      // threw before exporting): an extension with no working origin
+      // gate must not run privileged page-initiated ops at all (J11).
+      if (!root.qdistroGate) {
+        console.warn(
+          "[qdistro/pageExtract] extract refused: the origin gate did not "
+          + "load; refusing rather than running ungated.");
+        return;
+      }
+      {
         if (root.qdistroGate.ready && !root.qdistroGate.isLoaded()) {
           await root.qdistroGate.ready();
         }
@@ -189,7 +198,11 @@
     // request comes from the trusted bridge (codex finding #4). Await
     // the gate's first read so a cold-start request can't slip past the
     // allowlist while it loads. Module on/off is gated in the dispatcher.
-    if (root.qdistroGate) {
+    // FAIL CLOSED when the gate is absent — see the context-menu path.
+    if (!root.qdistroGate) {
+      return { ok: false, error: "origin_not_allowed" };
+    }
+    {
       if (root.qdistroGate.ready && !root.qdistroGate.isLoaded()) {
         await root.qdistroGate.ready();
       }
