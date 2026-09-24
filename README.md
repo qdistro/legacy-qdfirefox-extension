@@ -1,3 +1,9 @@
+> **Moved.** This repository is frozen and archived. Development continues in
+> [qdistro/qdistro](https://github.com/qdistro/qdistro/tree/main/qdfirefox-extension) under
+> `qdfirefox-extension/`. Its full history up to `d5aa682bd` is also preserved there on
+> branch [`legacy/multirepo/qdfirefox-extension`](https://github.com/qdistro/qdistro/tree/legacy/multirepo/qdfirefox-extension).
+> This repository was renamed from `qdfirefox-extension` to `legacy-qdfirefox-extension`.
+
 # qdfirefox-extension
 
 Firefox MV3 WebExtension — native-messaging client for the qdistro browser bridge. Peer of [qdchrome-extension](../qdchrome-extension); same wire protocol, different host environment.
